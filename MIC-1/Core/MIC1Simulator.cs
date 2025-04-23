@@ -1,36 +1,32 @@
 ﻿namespace MLDComputing.Emulators.MIC1.Core;
 
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Bus;
 using Constants;
 using Display;
 using Enums;
-using IJVM;
-using Memory;
 using MicroCode;
 
 public class MIC1Simulator
 {
-    private readonly NumberFormat _numberFormat;
-
     private readonly int _targetHz;
 
     private readonly int _refreshRate;
 
     private bool _haltDetected;
 
-    // Control Store (Microcode Storage)
-    private Dictionary<MicroInstructionCode, MicroInstruction> _microCodeControlStore = [];
+    private MicroInstruction[] _microCodeControlStore = [];
 
-    public Dictionary<OpCode, long> PerOpcodeCycles = new();
+    public long[] PerOpcodeCycles = new long[SimulatorConstants.MicroCode.StoreSize];
 
     private int _cyclesPerFrame;
 
     private float _msPerFrame;
 
-    private Stopwatch _totalTime = new Stopwatch();
+    public bool UnThrottled { get; }
 
-    private bool _unThrottled;
+    public LogOptions Options { get; }
 
     public long CycleCount { get; private set; }
 
@@ -38,73 +34,86 @@ public class MIC1Simulator
 
     public long InstructionCycleCount { get; private set; }
 
-    public Memory.Memory Memory { get; set; }
+    public NumberFormat Format { get; }
+    
+    public Memory Memory { get; set; }
 
     public Registers Registers { get; set; } = new();
 
-    public MIC1Simulator(bool verboseLogging = true, int memorySize = SimulatorConstants.DefaultMemorySize,
+    public Stopwatch TotalElapsedTime { get; } = new();
+
+    public MIC1Simulator(LogOptions logOptions = LogOptions.All, int memorySize = SimulatorConstants.DefaultMemorySize,
         NumberFormat numberFormat = NumberFormat.Hex, int targetHz = SimulatorConstants.DefaultTargetFrequencyHz,
-        int refreshRate = SimulatorConstants.DefaultRefreshRateHz)
+        int refreshRate = SimulatorConstants.DefaultRefreshRateHz, bool unThrottled = false)
     {
-        _numberFormat = numberFormat;
+        Format = numberFormat;
         _targetHz = targetHz;
         _refreshRate = refreshRate;
-
-        Memory = new Memory.Memory(memorySize);
-
-        Init(memorySize, verboseLogging);
+        Options = logOptions;
+        UnThrottled = unThrottled;
+        Memory = new Memory(memorySize);
     }
 
-    private void Init(int memorySize, bool verboseLogging)
+    private void Init()
     {
+        CycleCount = 0;
+        InstructionCycleCount = 0;
+        IJVMCycleCount = 0;
+        _haltDetected = false;
         _cyclesPerFrame = _targetHz / _targetHz;
         _msPerFrame = SimulatorConstants.MillisecondsPerSecond / _refreshRate;
-        
-        DebugConsole.Verbose = verboseLogging;
+
+        DebugConsole.Verbose = Options.HasFlag(LogOptions.ConsoleMessages);
 
         InitializeMicrocode();
+
+        TotalElapsedTime.Restart();
     }
 
-    public async Task Run(bool unThrottled = false)
+    public async Task Run()
     {
-        _unThrottled = unThrottled;
-
-        _haltDetected = false;
-
-        _totalTime.Restart();
+        Init();
 
         // Set MicroProgramCounter to 0 to repeatedly run the Fetch/Decode cycle
         while (!_haltDetected)
         {
-            Registers.MPC = (int)MicroInstructionCode.FetchStartFetchDecode;
+            Registers.MPC = (int)MicroInstructionCode.FETCHStartFetchDecode;
 
             await ProcessNextInstruction();
         }
 
-        _totalTime.Stop();
+        TotalElapsedTime.Stop();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void JumpToNext(MicroInstruction mi)
     {
-        // base address field (9 or 12 bits depending on your store size)
+        // Start with the base next address
         var next = mi.Address;
 
-        // JAM bit 0 → opcode dispatch
-        if ((mi.JAM & 0b1) != 0)
+        if ((mi.JAM & (byte)JAMControl.JAMC) != 0)
         {
-            next |= Registers.MBR & 0xFF; // OR in the opcode
+            next |= 0x100 | Registers.MBR;
+        }
+        
+        // Check for JAMZ — if enabled and H == 0 (low byte only), OR MBR into MPC
+        if ((mi.JAM & (byte)JAMControl.JAMZ) != 0 && ALU.IsZero)
+        {
+            // This is start of the jump table that will have 64 bytes set to execute the same instruction
+            next = (int)MicroInstructionCode.JUMPTableStart | (Registers.MBR & 0x3F);
         }
 
         Registers.MPC = next;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void CheckForTermination()
     {
         if (!MemoryLayout.IsInStack(Registers.SP))
         {
             DebugConsole.WriteLine("STACK OVERFLOW DETECTED");
             DebugConsole.WriteLine(
-                $"SP = 0x{Registers.FormatRegister("SP", Registers.SP, _numberFormat)} is outside valid stack range " +
+                $"SP = 0x{Registers.FormatRegister("SP", Registers.SP, Format)} is outside valid stack range " +
                 $"(0x{MemoryLayout.StackSegment.Start:X4}–0x{MemoryLayout.StackSegment.End:X4})");
 
             _haltDetected = true;
@@ -119,7 +128,7 @@ public class MIC1Simulator
         DebugConsole.WriteLine("HALT encountered – normal termination.");
         _haltDetected = true;
     }
-    
+
     private void Execute()
     {
         CycleCount++;
@@ -128,7 +137,7 @@ public class MIC1Simulator
         var mi = DecodeNext();
 
         DebugConsole.WriteLine(
-            $"Starting execution of {mi} {Registers.FormatRegister("MPC", Registers.MPC, _numberFormat)}, {Registers.FormatRegister("PC", Registers.PC, _numberFormat)}");
+            $"Starting execution of {mi} {Registers.FormatRegister("MPC", Registers.MPC, Format)}, {Registers.FormatRegister("PC", Registers.PC, Format)}");
 
         CheckForTermination();
 
@@ -136,32 +145,29 @@ public class MIC1Simulator
 
         if (mi.MemoryAfterRegisterWrite)
         {
-            Registers.SetRegisterValue(mi, aluResult);
+            Registers.SetRegisterFromALU(aluResult, mi.C);
             Memory.Access(Registers, mi);
         }
         else
         {
             Memory.Access(Registers, mi);
-            Registers.SetRegisterValue(mi, aluResult);
+            Registers.SetRegisterFromALU(aluResult, mi.C);
         }
-        
+
         JumpToNext(mi);
 
         DebugConsole.WriteLine(
-            $"Ending execution of {mi} {Registers.FormatRegister("MPC", Registers.MPC, _numberFormat)}, {Registers.FormatRegister("PC", Registers.PC, _numberFormat)}");
-
+            $"Ending execution of {mi} {Registers.FormatRegister("MPC", Registers.MPC, Format)}, {Registers.FormatRegister("PC", Registers.PC, Format)}");
     }
 
-    private MicroInstruction? DecodeNext()
+    private MicroInstruction DecodeNext()
     {
-        var currentMicrocodeAddress = Registers.MPC;
+        var mi = _microCodeControlStore[Registers.MPC];
 
-        var microCodeKey = (MicroInstructionCode)currentMicrocodeAddress;
-
-        if (!_microCodeControlStore.TryGetValue(microCodeKey, out var mi))
+        if (mi == null)
         {
             throw new InvalidOperationException(
-                $"No microcode routine found for OPCODE: 0x{(int)microCodeKey:X2}.");
+                $"No microcode routine found at: 0x{Registers.MPC:X2}.");
         }
 
         return mi;
@@ -177,26 +183,23 @@ public class MIC1Simulator
         InstructionCycleCount = 0;
 
         var frameTimer = new Stopwatch();
-        
+
         do
         {
             long frameCount = 0;
             long totalCycles = 0;
 
-            frameTimer.Restart();
-
             var cyclesExecuted = 0;
 
-            // Handle skipped frame catch-up (bounded)
-            var framesToSimulate = 1;
+            var framesToSimulate = UnThrottled
+                ? 1
+                : Math.Max(1, Math.Min(SimulatorConstants.MaxSkippedFrames,
+                    (int)(frameTimer.Elapsed.TotalMilliseconds / _msPerFrame)));
 
-            if (!_unThrottled)
+            if (framesToSimulate > 1)
             {
-                var elapsed = frameTimer.Elapsed.TotalMilliseconds;
-                framesToSimulate = Math.Max(1,
-                    Math.Min(SimulatorConstants.MaxSkippedFrames, (int)(elapsed / _msPerFrame)));
+                int a = 1;
             }
-
             for (var i = 0; i < framesToSimulate; i++)
             {
                 var frameCycles = 0;
@@ -213,27 +216,25 @@ public class MIC1Simulator
             totalCycles += cyclesExecuted;
             frameCount++;
 
-            // Optional: display info once per frame
             if (frameCount % _refreshRate == 0)
             {
-                DebugConsole.WriteLine(
-                    $"[Frame {frameCount}] Total Cycles: {totalCycles}, Elapsed Time: {_totalTime.Elapsed.TotalSeconds:F2}s");
+                DebugConsole.WriteLine($"[Frame {frameCount}] Total Cycles: {totalCycles}");
             }
 
-            // Throttle to match real-time
-            if (_unThrottled)
-            {
-                return;
-            }
-
+            // Timing should come AFTER simulation
             var elapsedMs = frameTimer.Elapsed.TotalMilliseconds;
             var delay = _msPerFrame - elapsedMs;
 
-            if (delay > 0)
+            if (!UnThrottled && delay > 0)
             {
+                Console.WriteLine(delay);
                 await Task.Delay((int)delay);
             }
-        } while (!_haltDetected && Registers.MPC != (int)MicroInstructionCode.FetchStartFetchDecode);
+
+            frameTimer.Restart();
+
+        } while (!_haltDetected && Registers.MPC != (int)MicroInstructionCode.FETCHStartFetchDecode);
+
 
         UpdateIJVMCycles();
     }
@@ -242,10 +243,9 @@ public class MIC1Simulator
     {
         IJVMCycleCount++;
 
-        var opcode = (OpCode)Registers.MBR;
-
-        PerOpcodeCycles.TryAdd(opcode, 0);
-
-        PerOpcodeCycles[opcode] += InstructionCycleCount;
+        if(Options.HasFlag(LogOptions.DetailedStats))
+        {
+            PerOpcodeCycles[Registers.CurrentOpcode] += InstructionCycleCount;
+        }
     }
 }

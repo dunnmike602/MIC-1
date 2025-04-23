@@ -2,7 +2,6 @@ namespace MLDComputing.Emulators.MIC1.Core.MicroCode;
 
 using Bus;
 using IJVM;
-using Memory;
 
 public class MicroInstruction
 {
@@ -14,7 +13,7 @@ public class MicroInstruction
 
     public int C { get; set; }
 
-    public int JAM { get; set; }
+    public byte JAM { get; set; }
 
     public bool MemoryAfterRegisterWrite { get; set; } = true;
 
@@ -22,12 +21,7 @@ public class MicroInstruction
 
     public MicroInstructionCode Key { get; set; }
 
-    public string? Name { get; set; }
+    public string? Name => Key.ToString();
 
-    public OpCode OpCode { get; set; }
-
-    public override string ToString()
-    {
-        return $"OpCode: {OpCode.ToString()} Name: {Name ?? "N/A"}";
-    }
+    public string? OpCode { get; set; }
 }

@@ -21,4 +21,7 @@ public enum ALUOperation
     CombineOffset = 15,
     CombineHighLow = 16,
     SignExtend8 = 17,
+    IncrementBBy2 = 18,
+    IncrementBBy3 = 19,
+    DecrementBBy2 = 20,
 }

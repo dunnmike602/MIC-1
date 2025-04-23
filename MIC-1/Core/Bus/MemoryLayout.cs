@@ -1,4 +1,6 @@
-﻿namespace MLDComputing.Emulators.MIC1.Core.Memory;
+﻿namespace MLDComputing.Emulators.MIC1.Core.Bus;
+
+using System.Runtime.CompilerServices;
 
 public static class MemoryLayout
 {
@@ -14,15 +16,24 @@ public static class MemoryLayout
 
         return region;
     }
-            
-    public static bool IsInCode(int address) =>
-        address is >= CodeSegment.Start and <= CodeSegment.End;
 
-    public static bool IsInHeap(int address) =>
-        address is >= DataSegment.Start and <= DataSegment.End;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsInCode(int address)
+    {
+        return address is >= CodeSegment.Start and <= CodeSegment.End;
+    }
 
-    public static bool IsInStack(int address) =>
-        address is >= StackSegment.Start and <= StackSegment.End;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsInHeap(int address)
+    {
+        return address is >= DataSegment.Start and <= DataSegment.End;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsInStack(int address)
+    {
+        return address is >= StackSegment.Start and <= StackSegment.End;
+    }
 
     public static class CodeSegment
     {

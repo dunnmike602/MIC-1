@@ -1,4 +1,4 @@
-﻿namespace MLDComputing.Emulators.MIC1.Core.Memory;
+﻿namespace MLDComputing.Emulators.MIC1.Core.Bus;
 
 public enum MemoryRegion
 {

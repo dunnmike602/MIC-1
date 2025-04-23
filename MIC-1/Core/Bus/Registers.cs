@@ -1,7 +1,5 @@
+using System.Runtime.CompilerServices;
 using MLDComputing.Emulators.MIC1.Core.Enums;
-using MLDComputing.Emulators.MIC1.Core.Extensions;
-using MLDComputing.Emulators.MIC1.Core.Memory;
-using MLDComputing.Emulators.MIC1.Core.MicroCode;
 using MLDComputing.Emulators.MIC1.Display;
 
 namespace MLDComputing.Emulators.MIC1.Core.Bus;
@@ -42,6 +40,9 @@ public class Registers
     // 	Top of Stack Cache (32bit)  Caches the top value of the stack for faster access
     public int TOS { get; set; }
 
+    // Tracks the current OpCode, the MIC-1 architecture allows for 256 microcde slots so this will fit in a byte
+    public byte CurrentOpcode { get; set; }
+
     // For debugging purposes, print all registers
     public void PrintRegisters()
     {
@@ -74,60 +75,43 @@ public class Registers
         return returnValue;
     }
 
-    public void SetRegisterValue(MicroInstruction mi, int aluResult)
-    {
-        foreach (RegisterLoadSignal signal in Enum.GetValues(typeof(RegisterLoadSignal)))
-        {
-            if (mi.C.IsBitSet(signal))
-            {
-                SelectRegister(aluResult, signal);
-            }
-        }
-    }
 
-    private void SelectRegister(int aluResult, RegisterLoadSignal signal)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void SetRegisterFromALU(int aluResult, int cBitmask)
     {
-        switch (signal)
+        switch (cBitmask)
         {
-            case RegisterLoadSignal.H:
+            case 1 << (int)RegisterLoadSignal.H:
                 H = aluResult;
                 break;
-
-            case RegisterLoadSignal.MDR:
+            case 1 << (int)RegisterLoadSignal.MDR:
                 MDR = aluResult;
                 break;
-
-            case RegisterLoadSignal.MAR:
+            case 1 << (int)RegisterLoadSignal.MAR:
                 MAR = aluResult;
                 break;
-
-            case RegisterLoadSignal.PC:
+            case 1 << (int)RegisterLoadSignal.PC:
                 PC = aluResult;
                 break;
-
-            case RegisterLoadSignal.SP:
+            case 1 << (int)RegisterLoadSignal.SP:
                 SP = aluResult;
                 break;
-
-            case RegisterLoadSignal.LV:
+            case 1 << (int)RegisterLoadSignal.LV:
                 LV = aluResult;
                 break;
-
-            case RegisterLoadSignal.CPP:
+            case 1 << (int)RegisterLoadSignal.CPP:
                 CPP = aluResult;
                 break;
-
-            case RegisterLoadSignal.TOS:
+            case 1 << (int)RegisterLoadSignal.TOS:
                 TOS = aluResult;
                 break;
-
-            case RegisterLoadSignal.OPC:
+            case 1 << (int)RegisterLoadSignal.OPC:
                 OPC = aluResult;
                 break;
-
-            case RegisterLoadSignal.MPC:
+            case 1 << (int)RegisterLoadSignal.MPC:
                 MPC = aluResult;
                 break;
         }
     }
+
 }
