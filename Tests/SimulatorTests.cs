@@ -8,7 +8,7 @@ using FluentAssertions;
 public sealed class SimulatorTests
 {
     [TestMethod]
-    public async Task Run_WhenValidProgramIsLoaded_ItWillRun()
+    public void Run_WhenValidProgramIsLoaded_ItWillRun()
     {
         // Arrange
         var mic1 = new MIC1Simulator
@@ -22,7 +22,7 @@ public sealed class SimulatorTests
         LoadStackTest(mic1);
 
         // Act
-        await mic1.Run();
+        mic1.Run();
 
         // Assert
         mic1.CycleCount.Should().Be(36);

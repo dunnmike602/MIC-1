@@ -1,12 +1,33 @@
 ﻿namespace MLDComputing.Emulators.MIC1;
 
+using System.Diagnostics;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
+using System.Runtime.InteropServices;
 using Core;
 using Core.Constants;
-using Core.Enums;
+using Core.Events;
 using Core.IJVM;
+using Ipc;
 
 public class Program
 {
+#if WINDOWS
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentProcessorNumber();
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint SetThreadAffinityMask(IntPtr hThread, uint dwThreadAffinityMask);
+
+#elif LINUX
+    [DllImport("libc")]
+    private static extern int sched_getcpu();
+#endif
+
+
     public static async Task Main(string[] args)
     {
         try
@@ -19,25 +40,43 @@ public class Program
         }
     }
 
+    private static void WriteStatusLine(string label, string value, float speed)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"\r{label}: {value,-20}");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write($" Speed: {speed,10}");
+        Console.ResetColor();
+    }
+
     private static async Task RunSimulator()
     {
-        var mic1 = new MIC1Simulator(LogOptions.DetailedStats,  numberFormat: NumberFormat.Hex,
-            unThrottled:false)
-        {
-            Registers =
-            {
-                PC = 1000
-            }
-        };
+        using var mic1 = new MIC1Simulator(false, unThrottled: true, memoryChecking: false, showDetailedStats: false);
 
-        LoadIFEQTest(mic1);
+        //    HandleNormalEvents(mic1);
+
+        //   HandleTraps(mic1);
 
         try
         {
-         //   for (int i = 0; i < 100; i++)
+            for (var i = 0; i < 2500; i++)
             {
-                mic1.Registers.PC = 1000;
-                await mic1.Run();
+                mic1.Init(true);
+
+                LoadIFEQTest(mic1);
+          
+                await Task.Run(() => mic1.Run(pc: 1000));
+
+                var cycleCount = mic1.CycleCount;
+                var iJVMCycleCount = mic1.IJVMCycleCount;
+                var elapsedTicks = mic1.TotalElapsedTime.ElapsedTicks;
+                var elapsedSeconds = mic1.TotalElapsedTime.ElapsedMilliseconds * 1000;
+             
+                var total = (cycleCount /
+                             ((float)elapsedTicks / Stopwatch.Frequency));
+
+                Console.WriteLine($"SPEED=" + total / 1e6);
+               // PrintStats(mic1, cycleCount, iJVMCycleCount, elapsedSeconds, elapsedTicks);
             }
         }
         catch (Exception e)
@@ -46,8 +85,71 @@ public class Program
             throw;
         }
 
-        PrintStackTop(mic1);
-        PrintStats(mic1);
+
+        // TestCores(mic1);
+    }
+
+    private static void TestCores(MIC1Simulator mic1)
+    {
+        var logicalProcessorCount = Environment.ProcessorCount;
+        Console.WriteLine($"Running on {logicalProcessorCount} logical processors.");
+
+        for (var core = 0; core < logicalProcessorCount; core++)
+        {
+            Console.WriteLine($"\nRunning on Core {core}");
+
+#if WINDOWS
+            // Set affinity to one core (bitmask: 1 shifted by core number)
+            var mask = (uint)(1 << core);
+            SetThreadAffinityMask(GetCurrentThread(), mask);
+#endif
+            // Optional: Give the OS a moment to switch core (very minor delay)
+            Thread.Sleep(50);
+
+            // Run your simulator!
+            mic1.Init(true);
+
+            LoadIFEQTest(mic1);
+            mic1.Run(pc: 1000);
+
+            //PrintStats(mic1, (uint?)core);
+        }
+    }
+
+    private static void HandleTraps(MIC1Simulator mic1)
+    {
+        var client = new LogPipeClient();
+        var clientConnected = client.Connect();
+
+        if (clientConnected)
+        {
+            mic1.Trap += (sender, args) =>
+            {
+                client.SendLog($"{args.TrapCode}: {args.Message}");
+                client.SendLog(string.Empty);
+                client.SendLog("Additional Information-------------------------------");
+                client.SendLog($"{args.Information ?? "N/A"}");
+                client.SendLog(string.Empty);
+            };
+        }
+    }
+
+    private static readonly Subject<ExecuteEventArgs> ExecutionSubject = new();
+
+    private static void HandleNormalEvents(MIC1Simulator mic1)
+    {
+        ExecutionSubject
+            .Buffer(TimeSpan.FromMilliseconds(1000)) // Batch over 1 second
+            .Where(batch => batch.Any()) // Skip empty
+            .Subscribe(batch =>
+            {
+                var processorSpeed = batch.Last().CycleCount /
+                                     ((float)batch.Last().ElapsedTicks / Stopwatch.Frequency);
+                WriteStatusLine("Started:", batch.Last().Instruction.Key.ToString(), processorSpeed / 1000);
+            });
+
+        // Hook the actual event to push to subject
+        mic1.ExecutionStarted += (sender, args) => ExecutionSubject.OnNext(args);
     }
 
     private static void LoadIFEQTest(MIC1Simulator mic1)
@@ -59,7 +161,7 @@ public class Program
             0xFF,                   // 1002 - low byte
 
             (byte)OpCode.BIPUSH,    // 1003 - Push 100
-            2,                    // 1004
+            120,                    // 1004
 
             // Label: LoopStart
             (byte)OpCode.DUP,       // 1005 - duplicate top of stack
@@ -101,43 +203,62 @@ public class Program
         // @formatter:on
     }
 
-    private static void PrintStackTop(MIC1Simulator mic1, int count = 2)
+    private static void PrintStats(MIC1Simulator mic1, long cycleCount, long iJVMCycleCount, long totalSeconds, long elapsedTicks, uint? core = null)
     {
-        Console.WriteLine("Stack Top:");
-        var sp = mic1.Registers.SP;
+        core ??= GetCurrentCore();
 
-        for (var i = mic1.Registers.SP + 8; i >= mic1.Registers.SP; i--)
-        {
-            // Read full word (4 bytes)
-            var value = mic1.Memory.ReadByte(i);
-            Console.WriteLine($"[0x{i:X4}] = {value}");
-        }
-    }
-
-    private static void PrintStats(MIC1Simulator mic1)
-    {
+        Console.WriteLine();
+        Console.WriteLine();
         Console.WriteLine("-------------------------Simulation Report-------------------------");
-        Console.WriteLine("{0,-30} {1:N0}", "Total Microcode Cycles:", mic1.CycleCount);
-        Console.WriteLine("{0,-30} {1:N0}", "Total IJVM Cycles:", mic1.IJVMCycleCount);
-        Console.WriteLine("{0,-30} {1:F3} sec", "Total elapsed time:", mic1.TotalElapsedTime.Elapsed.TotalSeconds);
-        var effectiveHz = mic1.CycleCount / mic1.TotalElapsedTime.Elapsed.TotalSeconds;
+        Console.WriteLine("{0,-30} {1:N0}", "Running on Core:", core);
+        Console.WriteLine("{0,-30} {1:N0}", "Total Microcode Cycles:", cycleCount);
+        Console.WriteLine("{0,-30} {1:N0}", "Total IJVM Cycles:", iJVMCycleCount);
+        Console.WriteLine("{0,-30} {1:F3} sec", "Total elapsed time:", totalSeconds);
+
+        var effectiveHz = cycleCount /
+                          ((float)elapsedTicks / Stopwatch.Frequency);
+
         Console.WriteLine("{0,-30} {1:N0} ({2:F3} MHz)", "Effective μInstr/sec:", effectiveHz,
-            effectiveHz / 1_000_000.0);
-        Console.WriteLine("{0,-30} {1:N0} Hz", "Target speed:", SimulatorConstants.DefaultTargetFrequencyHz);
+            effectiveHz / 1e6);
+        Console.WriteLine("{0,-30} {1:N0} MHz", "Target speed MHZ:", SimulatorConstants.DefaultTargetFrequencyHz / 1e6);
 
         Console.WriteLine();
 
         Console.WriteLine("{0,-30} {1}", "Instr", "Cycles");
 
-        foreach (OpCode opcode in Enum.GetValues(typeof(OpCode)))
+        for (var i = 0; i <= (int)OpCode.HALT; i++) // Replace `Last` with your max enum value
         {
-            var value = (int)opcode; // Or use (byte)opcode if you want the byte value
-            if (mic1.PerOpcodeCycles[value] != 0)
+            var opcode = (OpCode)i;
+            if (mic1.PerOpcodeCycles[i] != 0)
             {
-                Console.WriteLine("{0,-30} {1}", opcode, mic1.PerOpcodeCycles[value]);
+                Console.WriteLine("{0,-30} {1}", opcode, mic1.PerOpcodeCycles[i]);
             }
         }
 
         Console.WriteLine("-------------------------------------------------------------------");
     }
+
+ 
+#if WINDOWS
+        private static uint GetCurrentCore()
+        {
+            var core = GetCurrentProcessorNumber();
+
+            return core;
+        }
+
+#elif LINUX
+       public static uint GetCurrentCore()
+    {
+        int core = sched_getcpu();
+        if (core == -1)
+        {
+            throw new InvalidOperationException("Failed to get CPU core number.");
+        }
+        return (uint)core;
+    }
+#endif
+
+
+
 }

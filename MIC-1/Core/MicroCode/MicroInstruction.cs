@@ -1,27 +1,46 @@
 namespace MLDComputing.Emulators.MIC1.Core.MicroCode;
 
+using System.Runtime.InteropServices;
 using Bus;
-using IJVM;
 
-public class MicroInstruction
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public readonly struct MicroInstruction
 {
-    public int Address { get; set; }
+    public MicroInstruction()
+    {
+        Address = (int)MicroInstructionCode.Uninitialised;
+        ALU = ALUOperation.Nop;
+        B = RegisterSelectSignal.None;
+        C = 0;
+        JAM = 0;
+        MEM = MemoryOperation.NoOp;
+        Key = MicroInstructionCode.Uninitialised;
+        OpCode = null;
+        MemoryAfterRegisterWrite = true;
+    }
+    
+    public byte JAM { get; init; }
 
-    public ALUOperation ALU { get; set; }
+    public bool MemoryAfterRegisterWrite { get; init; } = true;
 
-    public RegisterSelectSignal B { get; set; }
+    public int Address { get; init; }
 
-    public int C { get; set; }
+    public ALUOperation ALU { get; init; }
 
-    public byte JAM { get; set; }
+    public RegisterSelectSignal B { get; init; }
 
-    public bool MemoryAfterRegisterWrite { get; set; } = true;
+    public int C { get; init; }
 
-    public MemoryOperation MEM { get; set; }
+    public MemoryOperation MEM { get; init; }
 
-    public MicroInstructionCode Key { get; set; }
+    public MicroInstructionCode Key { get; init; }
 
-    public string? Name => Key.ToString();
+    public string Name => Key.ToString();
 
-    public string? OpCode { get; set; }
+    public string? OpCode { get; init; }
+
+    public override string ToString()
+    {
+        return Name;
+    }
 }

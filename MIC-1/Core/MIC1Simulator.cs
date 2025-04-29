@@ -4,85 +4,169 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Bus;
 using Constants;
-using Display;
 using Enums;
+using Events;
+using Extensions;
 using MicroCode;
+using Exceptions;
+using Exceptions.Interfaces;
+using static Bus.MemoryLayout;
 
-public class MIC1Simulator
+public sealed class MIC1Simulator : IDisposable
 {
-    private readonly int _targetHz;
-
-    private readonly int _refreshRate;
-
     private bool _haltDetected;
 
-    private MicroInstruction[] _microCodeControlStore = [];
+    private readonly MicroInstruction[] _microCodeControlStore = MicroCodeStoreBuilder.Build();
+
+    public readonly bool CollectInstructionStats;
+
+    public readonly int TargetHz;
 
     public long[] PerOpcodeCycles = new long[SimulatorConstants.MicroCode.StoreSize];
 
-    private int _cyclesPerFrame;
+    private bool _executingInstruction;
 
-    private float _msPerFrame;
+    public readonly bool ShowDetailedStats;
 
-    public bool UnThrottled { get; }
+    public bool UnThrottled;
 
-    public LogOptions Options { get; }
+    public bool MemoryChecking;
 
-    public long CycleCount { get; private set; }
+    public int MemorySize;
 
-    public long IJVMCycleCount { get; private set; }
+    public long CycleCount;
 
-    public long InstructionCycleCount { get; private set; }
+    public long IJVMCycleCount;
 
-    public NumberFormat Format { get; }
-    
-    public Memory Memory { get; set; }
+    public long InstructionCycleCount;
 
-    public Registers Registers { get; set; } = new();
+    public Memory Memory = new(1, false);
 
-    public Stopwatch TotalElapsedTime { get; } = new();
+    public Registers Registers = new();
 
-    public MIC1Simulator(LogOptions logOptions = LogOptions.All, int memorySize = SimulatorConstants.DefaultMemorySize,
-        NumberFormat numberFormat = NumberFormat.Hex, int targetHz = SimulatorConstants.DefaultTargetFrequencyHz,
-        int refreshRate = SimulatorConstants.DefaultRefreshRateHz, bool unThrottled = false)
+    public Stopwatch TotalElapsedTime = new();
+
+    public bool EnableExecutionEvents;
+
+    private bool _disposed;
+
+    public event EventHandler<ExecuteEventArgs>? ExecutionStarted;
+
+    public event EventHandler<ExecuteEventArgs>? ExecutionEnded;
+
+    public event EventHandler<TrapEventArgs>? Trap;
+
+    private void OnTrap(TrapCode trapCode, string message, string? information)
     {
-        Format = numberFormat;
-        _targetHz = targetHz;
-        _refreshRate = refreshRate;
-        Options = logOptions;
-        UnThrottled = unThrottled;
-        Memory = new Memory(memorySize);
-    }
-
-    private void Init()
-    {
-        CycleCount = 0;
-        InstructionCycleCount = 0;
-        IJVMCycleCount = 0;
-        _haltDetected = false;
-        _cyclesPerFrame = _targetHz / _targetHz;
-        _msPerFrame = SimulatorConstants.MillisecondsPerSecond / _refreshRate;
-
-        DebugConsole.Verbose = Options.HasFlag(LogOptions.ConsoleMessages);
-
-        InitializeMicrocode();
-
-        TotalElapsedTime.Restart();
-    }
-
-    public async Task Run()
-    {
-        Init();
-
-        // Set MicroProgramCounter to 0 to repeatedly run the Fetch/Decode cycle
-        while (!_haltDetected)
+        if (EnableExecutionEvents)
         {
-            Registers.MPC = (int)MicroInstructionCode.FETCHStartFetchDecode;
+            Trap?.Invoke(this, new TrapEventArgs(message, trapCode, information));
+        }
+    }
 
-            await ProcessNextInstruction();
+    private void OnExecutionStarted(MicroInstruction mi)
+    {
+        if (EnableExecutionEvents)
+        {
+            ExecutionStarted?.Invoke(this,
+                new ExecuteEventArgs(mi, Registers, CycleCount, IJVMCycleCount, TotalElapsedTime.ElapsedTicks));
+        }
+    }
+
+    private void OnExecutionEnded(MicroInstruction mi)
+    {
+        if (EnableExecutionEvents)
+        {
+            ExecutionEnded?.Invoke(this,
+                new ExecuteEventArgs(mi, Registers, CycleCount, IJVMCycleCount, TotalElapsedTime.ElapsedTicks));
+        }
+    }
+
+    public MIC1Simulator(bool enableExecutionEvents = true, int memorySize = SimulatorConstants.DefaultMemorySize,
+        int targetHz = SimulatorConstants.DefaultTargetFrequencyHz,
+        bool unThrottled = false, bool memoryChecking = true,
+        bool collectInstructionStats = true, bool showDetailedStats = true)
+    {
+        CollectInstructionStats = collectInstructionStats;
+        ShowDetailedStats = showDetailedStats;
+        EnableExecutionEvents = enableExecutionEvents;
+        TargetHz = targetHz;
+        MemorySize = memorySize;
+        UnThrottled = unThrottled;
+        MemoryChecking = memoryChecking;
+
+        Init(true);
+    }
+
+    public void Init(bool clearState)
+    {
+        if (clearState)
+        {
+            Registers = new Registers();
+            Memory = new Memory(MemorySize, MemoryChecking);
+
+            TotalElapsedTime = new Stopwatch();
+
+            PerOpcodeCycles = new long[SimulatorConstants.MicroCode.StoreSize];
+
+            CycleCount = 0;
+            InstructionCycleCount = 0;
+            IJVMCycleCount = 0;
+            _haltDetected = false;
+            TotalElapsedTime.Restart();
+        }
+    }
+
+    public void Run(bool clearState = false, int pc = 0, params byte[] bytes)
+    {
+        try
+        {
+            RunInternal(clearState, pc, bytes);
+        }
+        finally
+        {
+            Memory.Dispose();
         }
 
-        TotalElapsedTime.Stop();
+    }
+
+    private void RunInternal(bool clearState, int pc, byte[] bytes)
+    {
+        Init(clearState);
+        Registers.PC = pc;
+
+        if (bytes.Length > 0)
+        {
+            Memory.LoadProgram(pc, bytes);
+        }
+
+        Registers.MPC = (int)MicroInstructionCode.FETCHStartFetchDecode;
+
+        var ticksPerCycle = Stopwatch.Frequency / TargetHz;
+        var startTicks = Stopwatch.GetTimestamp();
+
+        while (!_haltDetected)
+        {
+            if (UnThrottled)
+            {
+                Execute();
+                continue;
+            }
+
+            var currentTicks = Stopwatch.GetTimestamp();
+            var elapsedTicks = currentTicks - startTicks;
+            var expectedCycles = elapsedTicks / ticksPerCycle;
+
+            while (CycleCount < expectedCycles && !_haltDetected)
+            {
+                Execute();
+            }
+
+            if (CycleCount >= expectedCycles)
+            {
+                Thread.SpinWait(50); // light CPU back-off
+            }
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -95,7 +179,7 @@ public class MIC1Simulator
         {
             next |= 0x100 | Registers.MBR;
         }
-        
+
         // Check for JAMZ — if enabled and H == 0 (low byte only), OR MBR into MPC
         if ((mi.JAM & (byte)JAMControl.JAMZ) != 0 && ALU.IsZero)
         {
@@ -109,15 +193,28 @@ public class MIC1Simulator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void CheckForTermination()
     {
-        if (!MemoryLayout.IsInStack(Registers.SP))
+        if (MemoryChecking && !IsInStack(Registers.SP))
         {
-            DebugConsole.WriteLine("STACK OVERFLOW DETECTED");
-            DebugConsole.WriteLine(
-                $"SP = 0x{Registers.FormatRegister("SP", Registers.SP, Format)} is outside valid stack range " +
-                $"(0x{MemoryLayout.StackSegment.Start:X4}–0x{MemoryLayout.StackSegment.End:X4})");
+            TrapCode trapCode;
+            string message;
+            if (Registers.SP > StackSegment.End)
+            {
+                trapCode = TrapCode.StackUnderflow;
+                message = "ABNORMAL TERMINATION - STACK UNDERFLOW DETECTED";
+            }
+            else
+            {
+                trapCode = TrapCode.StackOverflow;
+                message = "ABNORMAL TERMINATION - STACK OVERFLOW DETECTED";
+            }
+
+            var information =
+                $"SP = 0x{"SP".FormatRegister(Registers.SP, NumberFormat.Hex)} is outside valid stack range " +
+                $"(0x{StackSegment.Start:X4}–0x{StackSegment.End:X4})";
+
+            OnTrap(trapCode, message, information);
 
             _haltDetected = true;
-            return;
         }
 
         if (Registers.MPC != (int)MicroInstructionCode.HALT)
@@ -125,127 +222,115 @@ public class MIC1Simulator
             return;
         }
 
-        DebugConsole.WriteLine("HALT encountered – normal termination.");
+        OnTrap(TrapCode.Halt, "NORMAL TERMINATION - HALT DETECTED", null);
+
+        if (ShowDetailedStats)
+        {
+            // Processor accounting HALT is a special instruction so it is trapped and logged separately
+            IJVMCycleCount++;
+        }
+
         _haltDetected = true;
     }
 
-    private void Execute()
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private unsafe void Execute()
     {
-        CycleCount++;
-        InstructionCycleCount++;
+        ref var reg = ref Registers;
 
-        var mi = DecodeNext();
-
-        DebugConsole.WriteLine(
-            $"Starting execution of {mi} {Registers.FormatRegister("MPC", Registers.MPC, Format)}, {Registers.FormatRegister("PC", Registers.PC, Format)}");
-
-        CheckForTermination();
-
-        var aluResult = ALU.Calculate(Registers, mi, CycleCount);
-
-        if (mi.MemoryAfterRegisterWrite)
+        fixed (MicroInstruction* pMicroStore = _microCodeControlStore)
         {
-            Registers.SetRegisterFromALU(aluResult, mi.C);
-            Memory.Access(Registers, mi);
-        }
-        else
-        {
-            Memory.Access(Registers, mi);
-            Registers.SetRegisterFromALU(aluResult, mi.C);
-        }
+            ref readonly var mi = ref _microCodeControlStore[reg.MPC];
 
-        JumpToNext(mi);
-
-        DebugConsole.WriteLine(
-            $"Ending execution of {mi} {Registers.FormatRegister("MPC", Registers.MPC, Format)}, {Registers.FormatRegister("PC", Registers.PC, Format)}");
-    }
-
-    private MicroInstruction DecodeNext()
-    {
-        var mi = _microCodeControlStore[Registers.MPC];
-
-        if (mi == null)
-        {
-            throw new InvalidOperationException(
-                $"No microcode routine found at: 0x{Registers.MPC:X2}.");
-        }
-
-        return mi;
-    }
-
-    private void InitializeMicrocode()
-    {
-        _microCodeControlStore = MicroCodeStoreBuilder.Build();
-    }
-
-    private async Task ProcessNextInstruction()
-    {
-        InstructionCycleCount = 0;
-
-        var frameTimer = new Stopwatch();
-
-        do
-        {
-            long frameCount = 0;
-            long totalCycles = 0;
-
-            var cyclesExecuted = 0;
-
-            var framesToSimulate = UnThrottled
-                ? 1
-                : Math.Max(1, Math.Min(SimulatorConstants.MaxSkippedFrames,
-                    (int)(frameTimer.Elapsed.TotalMilliseconds / _msPerFrame)));
-
-            if (framesToSimulate > 1)
+            if (mi.Key == MicroInstructionCode.Uninitialised)
             {
-                int a = 1;
+                OnTrap(TrapCode.InvalidMicrocodeAddress,
+                    $"ABNORMAL TERMINATION - NO MICROCODE ROUTINE FOUND AT: 0x{Registers.MPC:X2}.", null);
+                _haltDetected = true;
+                return;
             }
-            for (var i = 0; i < framesToSimulate; i++)
-            {
-                var frameCycles = 0;
 
-                while (frameCycles < _cyclesPerFrame && !_haltDetected)
+            OnExecutionStarted(mi);
+
+            // Every time through this execute we do one micro instruction only so that is 1 cycle
+            CycleCount++;
+
+            if (ShowDetailedStats)
+            {
+                PerformIJVMAccounting();
+            }
+
+            CheckForTermination();
+
+            var aluResult = ALU.Calculate(reg, mi);
+
+            try
+            {
+                if (mi.MemoryAfterRegisterWrite)
                 {
-                    Execute();
-                    frameCycles++;
+                    reg.SetRegisterFromALU(aluResult, mi.C);
+                    Memory.Access(Registers, mi);
                 }
-
-                cyclesExecuted += frameCycles;
+                else
+                {
+                    Memory.Access(Registers, mi);
+                    reg.SetRegisterFromALU(aluResult, mi.C);
+                }
             }
-
-            totalCycles += cyclesExecuted;
-            frameCount++;
-
-            if (frameCount % _refreshRate == 0)
+            catch (Exception e) when (e is MemoryFaultException or WriteProtectException
+                                          or ExecutionProtectionException)
             {
-                DebugConsole.WriteLine($"[Frame {frameCount}] Total Cycles: {totalCycles}");
+                var trapCode = ((IFaultException)e).TrapCode;
+
+                Trap?.Invoke(this, new TrapEventArgs(e.Message, trapCode, null));
+                _haltDetected = true;
+                return;
             }
 
-            // Timing should come AFTER simulation
-            var elapsedMs = frameTimer.Elapsed.TotalMilliseconds;
-            var delay = _msPerFrame - elapsedMs;
+            JumpToNext(mi);
 
-            if (!UnThrottled && delay > 0)
-            {
-                Console.WriteLine(delay);
-                await Task.Delay((int)delay);
-            }
-
-            frameTimer.Restart();
-
-        } while (!_haltDetected && Registers.MPC != (int)MicroInstructionCode.FETCHStartFetchDecode);
-
-
-        UpdateIJVMCycles();
+            OnExecutionEnded(mi);
+        }
     }
 
-    private void UpdateIJVMCycles()
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void PerformIJVMAccounting()
     {
-        IJVMCycleCount++;
-
-        if(Options.HasFlag(LogOptions.DetailedStats))
+        // We are in the Fetch Decode Cycle
+        if (Registers.MPC is >= (int)MicroInstructionCode.FETCHStartFetchDecode
+            and <= (int)MicroInstructionCode.FETCHReadInstruction)
         {
-            PerOpcodeCycles[Registers.CurrentOpcode] += InstructionCycleCount;
+            // Update FETCH accounting this is not part of each IJVM opcode
+            PerOpcodeCycles[(int)MicroInstructionCode.FETCHStartFetchDecode]++;
+            _executingInstruction = false;
         }
+        // We are Just Entering the instruction
+        else if (Registers.MPC is >= (int)MicroInstructionCode.FETCHStartFetchDecode
+                 and <= (int)MicroInstructionCode.FETCHIncPC)
+        {
+            PerOpcodeCycles[(int)MicroInstructionCode.FETCHStartFetchDecode] += 1;
+            _executingInstruction = true;
+            IJVMCycleCount++;
+
+            // We can pick up the IJVM Instruction here
+            Registers.CurrentOpcode = Registers.MBR;
+        }
+        // We are executing an instruction
+        else if (_executingInstruction)
+        {
+            PerOpcodeCycles[Registers.CurrentOpcode]++;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        Memory.Dispose();
     }
 }
