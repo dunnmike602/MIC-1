@@ -1,26 +1,23 @@
 ﻿namespace MLDComputing.Emulators.MIC1.Core.Events;
 
-using Bus;
+using Enums;
 using MicroCode;
 
-public class ExecuteEventArgs : EventArgs
+public class ExecuteEventArgs(
+    MicroInstruction? instruction,
+    long cycleCount,
+    long ijvmCycleCount,
+    long elapsedTicks,
+    ExecutionEventCode eventCode)
+    : EventArgs
 {
-    public MicroInstruction Instruction;
-
-    public Registers Registers;
+    public MicroInstruction? Instruction = instruction;
     
-    public long CycleCount;
+    public long CycleCount = cycleCount;
 
-    public long IJVMCycleCount;
+    public long IJVMCycleCount = ijvmCycleCount;
 
-    public long ElapsedTicks;
+    public long ElapsedTicks = elapsedTicks;
 
-    public ExecuteEventArgs(MicroInstruction instruction, Registers registers, long cycleCount, long ijvmCycleCount, long elapsedTicks)
-    {
-        Instruction = instruction;
-        Registers = registers;
-        CycleCount = cycleCount;
-        IJVMCycleCount = ijvmCycleCount;
-        ElapsedTicks = elapsedTicks;
-    }
+    public ExecutionEventCode Event = eventCode;
 }

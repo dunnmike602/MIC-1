@@ -1,5 +1,6 @@
 ﻿namespace MLDComputing.Emulators.MIC1.Core.MicroCode;
 
+using System.Drawing;
 using Bus;
 using Constants;
 using IJVM;
@@ -8,7 +9,7 @@ public static class MicroCodeStoreBuilder
 {
     public static MicroInstruction[] Build()
     {
-        var microCodeControlArray = new MicroInstruction[SimulatorConstants.MicroCode.StoreSize];
+        var microCodeControlArray = CreateInitialisedArray();
 
         microCodeControlArray[(int)MicroInstructionCode.FETCHStartFetchDecode] = new MicroInstruction
         {
@@ -174,15 +175,28 @@ public static class MicroCodeStoreBuilder
             OpCode = nameof(OpCode.BIPUSH)
         };
 
-        // Step 9: Write MDR low 16 bits to memory
+        // Step 10: Write MDR low 16 bits to memory
         microCodeControlArray[(int)MicroInstructionCode.BIPUSHWriteLow] = new MicroInstruction
         {
             Key = MicroInstructionCode.BIPUSHWriteLow,
-            Address = (int)MicroInstructionCode.FETCHStartFetchDecode,
+            Address = (int)MicroInstructionCode.BIPUSHCacheTOS,
             B = RegisterSelectSignal.None,
             ALU = ALUOperation.Nop,
             C = 0,
             MEM = MemoryOperation.WriteWordFromMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.BIPUSH)
+        };
+
+        // Step 14: TOS ← MDR
+        microCodeControlArray[(int)MicroInstructionCode.BIPUSHCacheTOS] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.BIPUSHCacheTOS,
+            Address = (int)MicroInstructionCode.FETCHStartFetchDecode,
+            B = RegisterSelectSignal.MDR,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.TOS,
+            MEM = MemoryOperation.NoOp,
             JAM = (byte)JAMControl.None,
             OpCode = nameof(OpCode.BIPUSH)
         };
@@ -296,7 +310,7 @@ public static class MicroCodeStoreBuilder
         microCodeControlArray[(int)MicroInstructionCode.DUPWriteCopyLow] = new MicroInstruction
         {
             Key = MicroInstructionCode.DUPWriteCopyLow,
-            Address = (int)MicroInstructionCode.FETCHStartFetchDecode, // Done, go fetch next instruction
+            Address = (int)MicroInstructionCode.DUPCacheTOS, // Done, go fetch next instruction
             B = RegisterSelectSignal.None,
             ALU = ALUOperation.Nop,
             C = 0,
@@ -304,203 +318,41 @@ public static class MicroCodeStoreBuilder
             JAM = (byte)JAMControl.None,
             OpCode = nameof(OpCode.DUP)
         };
-        // Step 1: Load SP into MAR (top of stack)
-        microCodeControlArray[(int)MicroInstructionCode.IADDLoadFirst] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDLoadFirst,
-            Address = (int)MicroInstructionCode.IADDReadTopHigh,
-            B = RegisterSelectSignal.SP,
-            ALU = ALUOperation.PassB,
-            C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
 
-        // Step 2: Read high 16 bits of first value
-        microCodeControlArray[(int)MicroInstructionCode.IADDReadTopHigh] = new MicroInstruction
+        // Step 14: TOS ← MDR
+        microCodeControlArray[(int)MicroInstructionCode.DUPCacheTOS] = new MicroInstruction
         {
-            Key = MicroInstructionCode.IADDReadTopHigh,
-            Address = (int)MicroInstructionCode.IADDAdd2ToMARFirst,
-            B = RegisterSelectSignal.None,
-            ALU = ALUOperation.Nop,
-            C = 0,
-            MEM = MemoryOperation.ReadWordToMDRHigh,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 3: MAR += 2
-        microCodeControlArray[(int)MicroInstructionCode.IADDAdd2ToMARFirst] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDAdd2ToMARFirst,
-            Address = (int)MicroInstructionCode.IADDReadTopLow,
-            B = RegisterSelectSignal.MAR,
-            ALU = ALUOperation.IncrementBBy2,
-            C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 4: Read low 16 bits of first value
-        microCodeControlArray[(int)MicroInstructionCode.IADDReadTopLow] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDReadTopLow,
-            Address = (int)MicroInstructionCode.IADDIncrementSPAfterFirst,
-            B = RegisterSelectSignal.None,
-            ALU = ALUOperation.Nop,
-            C = 0,
-            MEM = MemoryOperation.ReadWordToMDRLow,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 5: Increment SP by 4 (pop first value)
-        microCodeControlArray[(int)MicroInstructionCode.IADDIncrementSPAfterFirst] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDIncrementSPAfterFirst,
-            Address = (int)MicroInstructionCode.IADDLoadSecondAddress,
-            B = RegisterSelectSignal.SP,
-            ALU = ALUOperation.IncrementBBy4,
-            C = 1 << (int)RegisterLoadSignal.SP,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 6: Load SP into MAR (now second value)
-        microCodeControlArray[(int)MicroInstructionCode.IADDLoadSecondAddress] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDLoadSecondAddress,
-            Address = (int)MicroInstructionCode.IADDReadSecondHigh,
-            B = RegisterSelectSignal.SP,
-            ALU = ALUOperation.PassB,
-            C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 7: Read high 16 bits of second value
-        microCodeControlArray[(int)MicroInstructionCode.IADDReadSecondHigh] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDReadSecondHigh,
-            Address = (int)MicroInstructionCode.IADDAdd2ToMARSecond,
-            B = RegisterSelectSignal.None,
-            ALU = ALUOperation.Nop,
-            C = 0,
-            MEM = MemoryOperation.ReadWordToMDRHigh,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 8: MAR += 2
-        microCodeControlArray[(int)MicroInstructionCode.IADDAdd2ToMARSecond] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDAdd2ToMARSecond,
-            Address = (int)MicroInstructionCode.IADDReadSecondLow,
-            B = RegisterSelectSignal.MAR,
-            ALU = ALUOperation.IncrementBBy2,
-            C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 9: Read low 16 bits of second value
-        microCodeControlArray[(int)MicroInstructionCode.IADDReadSecondLow] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDReadSecondLow,
-            Address = (int)MicroInstructionCode.IADDComputeResult,
-            B = RegisterSelectSignal.None,
-            ALU = ALUOperation.Nop,
-            C = 0,
-            MEM = MemoryOperation.ReadWordToMDRLow,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 10: Compute MDR = MDR + H
-        microCodeControlArray[(int)MicroInstructionCode.IADDComputeResult] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDComputeResult,
-            Address = (int)MicroInstructionCode.IADDDecrementSPAfterAdd,
-            B = RegisterSelectSignal.MDR,
-            ALU = ALUOperation.APlusB,
-            C = 1 << (int)RegisterLoadSignal.MDR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 11: Decrement SP by 4 (to prepare space for result)
-        microCodeControlArray[(int)MicroInstructionCode.IADDDecrementSPAfterAdd] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDDecrementSPAfterAdd,
-            Address = (int)MicroInstructionCode.IADDSetResultAddress,
-            B = RegisterSelectSignal.SP,
-            ALU = ALUOperation.DecrementBBy4,
-            C = 1 << (int)RegisterLoadSignal.SP,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 12: Set MAR = SP
-        microCodeControlArray[(int)MicroInstructionCode.IADDSetResultAddress] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDSetResultAddress,
-            Address = (int)MicroInstructionCode.IADDWriteResultHigh,
-            B = RegisterSelectSignal.SP,
-            ALU = ALUOperation.PassB,
-            C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 13: Write high 16 bits of result
-        microCodeControlArray[(int)MicroInstructionCode.IADDWriteResultHigh] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDWriteResultHigh,
-            Address = (int)MicroInstructionCode.IADDAdd2ToMARWrite,
-            B = RegisterSelectSignal.None,
-            ALU = ALUOperation.Nop,
-            C = 0,
-            MEM = MemoryOperation.WriteWordFromMDRHigh,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 14: MAR += 2
-        microCodeControlArray[(int)MicroInstructionCode.IADDAdd2ToMARWrite] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDAdd2ToMARWrite,
-            Address = (int)MicroInstructionCode.IADDWriteResultLow,
-            B = RegisterSelectSignal.MAR,
-            ALU = ALUOperation.IncrementBBy2,
-            C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
-        };
-
-        // Step 15: Write low 16 bits of result
-        microCodeControlArray[(int)MicroInstructionCode.IADDWriteResultLow] = new MicroInstruction
-        {
-            Key = MicroInstructionCode.IADDWriteResultLow,
+            Key = MicroInstructionCode.DUPCacheTOS,
             Address = (int)MicroInstructionCode.FETCHStartFetchDecode,
-            B = RegisterSelectSignal.None,
-            ALU = ALUOperation.Nop,
-            C = 0,
-            MEM = MemoryOperation.WriteWordFromMDRLow,
+            B = RegisterSelectSignal.MDR,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.TOS,
+            MEM = MemoryOperation.NoOp,
             JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.IADD)
+            OpCode = nameof(OpCode.DUP)
         };
 
+        RegisterBinaryStackOpSequence(microCodeControlArray, MicroInstructionCode.IADDLoadFirst,
+            MicroInstructionCode.IADDLoadNext, nameof(OpCode.IADD),
+            ALUOperation.APlusB);
+
+        RegisterBinaryStackOpSequence(microCodeControlArray, MicroInstructionCode.ISUBLoadFirst,
+            MicroInstructionCode.ISUBLoadNext, nameof(OpCode.ISUB),
+            ALUOperation.BMinusA);
+
+        RegisterBinaryStackOpSequence(microCodeControlArray, MicroInstructionCode.IANDLoadFirst,
+            MicroInstructionCode.IANDLoadNext, nameof(OpCode.IAND),
+            ALUOperation.AAndB);
 
 
+        RegisterBinaryStackOpSequence(microCodeControlArray, MicroInstructionCode.IORLoadFirst,
+            MicroInstructionCode.IORLoadNext, nameof(OpCode.IOR),
+            ALUOperation.AOrB);
+        
+        RegisterBinaryStackOpSequence(microCodeControlArray, MicroInstructionCode.IXORLoadFirst,
+            MicroInstructionCode.IXORLoadNext, nameof(OpCode.IXOR),
+            ALUOperation.AXorB);
+        
         microCodeControlArray[(int)MicroInstructionCode.GOTOInit] = new MicroInstruction
         {
             Key = MicroInstructionCode.GOTOInit,
@@ -509,7 +361,7 @@ public static class MicroCodeStoreBuilder
             ALU = ALUOperation.Nop,
             C = 0,
             MEM = MemoryOperation.NoOp,
-            JAM = 0,
+            JAM = (byte)JAMControl.None,
             OpCode = nameof(OpCode.GOTO)
         };
 
@@ -613,42 +465,81 @@ public static class MicroCodeStoreBuilder
         microCodeControlArray[(int)MicroInstructionCode.IFEQLoadTop] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQLoadTop,
-            Address = (int)MicroInstructionCode.IFEQReadTopAndIncSP,
+            Address = (int)MicroInstructionCode.IFEQReadTopHigh,
             B = RegisterSelectSignal.SP,
             ALU = ALUOperation.PassB,
             C = 1 << (int)RegisterLoadSignal.MAR,
             MEM = MemoryOperation.NoOp,
             JAM = (byte)JAMControl.None,
-            OpCode = nameof(OpCode.SETSP)
+            OpCode = nameof(OpCode.IFEQ)
         };
 
-        // Step 2: MDR ← M[MAR]; SP ← SP + 4
-        microCodeControlArray[(int)MicroInstructionCode.IFEQReadTopAndIncSP] = new MicroInstruction
+        // Step 2: Read high 16 bits
+        microCodeControlArray[(int)MicroInstructionCode.IFEQReadTopHigh] = new MicroInstruction
         {
-            Key = MicroInstructionCode.IFEQReadTopAndIncSP,
-            Address = (int)MicroInstructionCode.IFEQStoreTopInH,
-            B = RegisterSelectSignal.SP,
-            ALU = ALUOperation.IncrementBBy4,
-            C = 1 << (int)RegisterLoadSignal.SP,
-        //    MEM = MemoryOperation.ReadWordToMDR,
+            Key = MicroInstructionCode.IFEQReadTopHigh,
+            Address = (int)MicroInstructionCode.IFEQAdd2ToMAR,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRHigh,
             JAM = (byte)JAMControl.None,
             OpCode = nameof(OpCode.IFEQ)
         };
 
-        // Step 3: H ← MDR
+        // Step 3: MAR += 2
+        microCodeControlArray[(int)MicroInstructionCode.IFEQAdd2ToMAR] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQAdd2ToMAR,
+            Address = (int)MicroInstructionCode.IFEQReadTopLow,
+            B = RegisterSelectSignal.MAR,
+            ALU = ALUOperation.IncrementBBy2,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 4: Read low 16 bits
+        microCodeControlArray[(int)MicroInstructionCode.IFEQReadTopLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQReadTopLow,
+            Address = (int)MicroInstructionCode.IFEQStoreTopInH,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 5: H ← MDR
         microCodeControlArray[(int)MicroInstructionCode.IFEQStoreTopInH] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQStoreTopInH,
-            Address = (int)MicroInstructionCode.IFEQIncPCForLow,
+            Address = (int)MicroInstructionCode.IFEQIncrementSP,
             B = RegisterSelectSignal.MDR,
             ALU = ALUOperation.PassB,
             C = 1 << (int)RegisterLoadSignal.H,
             MEM = MemoryOperation.NoOp,
-            JAM = 0,
+            JAM = (byte)JAMControl.None,
             OpCode = nameof(OpCode.IFEQ)
         };
 
-        // Step 3: PC ← PC + 1 to get to low byte of offset
+        // Step 6: SP ← SP + 4
+        microCodeControlArray[(int)MicroInstructionCode.IFEQIncrementSP] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQIncrementSP,
+            Address = (int)MicroInstructionCode.IFEQIncPCForLow,
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.IncrementBBy4,
+            C = 1 << (int)RegisterLoadSignal.SP,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 7: PC ← PC + 1 (fetch offset)
         microCodeControlArray[(int)MicroInstructionCode.IFEQIncPCForLow] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQIncPCForLow,
@@ -661,7 +552,7 @@ public static class MicroCodeStoreBuilder
             OpCode = nameof(OpCode.IFEQ)
         };
 
-        // Step 4: MAR ← PC (low byte)
+        // Step 8: MAR ← PC
         microCodeControlArray[(int)MicroInstructionCode.IFEQLoadLow] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQLoadLow,
@@ -674,8 +565,7 @@ public static class MicroCodeStoreBuilder
             OpCode = nameof(OpCode.IFEQ)
         };
 
-
-        // Step 5: MBR ← M[MAR]
+        // Step 9: MBR ← M[MAR]
         microCodeControlArray[(int)MicroInstructionCode.IFEQReadLow] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQReadLow,
@@ -688,7 +578,7 @@ public static class MicroCodeStoreBuilder
             OpCode = nameof(OpCode.IFEQ)
         };
 
-        // Step 6: Conditional jump based on H == 0
+        // Step 10: Conditional jump if H == 0
         microCodeControlArray[(int)MicroInstructionCode.IFEQCheckZero] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQCheckZero,
@@ -697,11 +587,11 @@ public static class MicroCodeStoreBuilder
             ALU = ALUOperation.PassA,
             C = 0,
             MEM = MemoryOperation.NoOp,
-            JAM = (byte)JAMControl.JAMZ, // JAMZ: Use zero flag to possibly override MPC bits
+            JAM = (byte)JAMControl.JAMZ_EQ,
             OpCode = nameof(OpCode.IFEQ)
         };
 
-        // Step 7: Default no Jump skip over the last operand and carry on
+        // Step 11: Default PC += 1 if not jumping
         microCodeControlArray[(int)MicroInstructionCode.IFEQSkipOperandsAndReturn] = new MicroInstruction
         {
             Key = MicroInstructionCode.IFEQSkipOperandsAndReturn,
@@ -714,6 +604,298 @@ public static class MicroCodeStoreBuilder
             OpCode = nameof(OpCode.IFEQ)
         };
 
+        // Step 1: MAR ← SP
+        microCodeControlArray[(int)MicroInstructionCode.IFEQLoadTop] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQLoadTop,
+            Address = (int)MicroInstructionCode.IFEQReadTopHigh,
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 2: Read high 16 bits
+        microCodeControlArray[(int)MicroInstructionCode.IFEQReadTopHigh] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQReadTopHigh,
+            Address = (int)MicroInstructionCode.IFEQAdd2ToMAR,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRHigh,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 3: MAR += 2
+        microCodeControlArray[(int)MicroInstructionCode.IFEQAdd2ToMAR] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQAdd2ToMAR,
+            Address = (int)MicroInstructionCode.IFEQReadTopLow,
+            B = RegisterSelectSignal.MAR,
+            ALU = ALUOperation.IncrementBBy2,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 4: Read low 16 bits
+        microCodeControlArray[(int)MicroInstructionCode.IFEQReadTopLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQReadTopLow,
+            Address = (int)MicroInstructionCode.IFEQStoreTopInH,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 5: H ← MDR
+        microCodeControlArray[(int)MicroInstructionCode.IFEQStoreTopInH] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQStoreTopInH,
+            Address = (int)MicroInstructionCode.IFEQIncrementSP,
+            B = RegisterSelectSignal.MDR,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.H,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 6: SP ← SP + 4
+        microCodeControlArray[(int)MicroInstructionCode.IFEQIncrementSP] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQIncrementSP,
+            Address = (int)MicroInstructionCode.IFEQIncPCForLow,
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.IncrementBBy4,
+            C = 1 << (int)RegisterLoadSignal.SP,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 7: PC ← PC + 1 (fetch offset)
+        microCodeControlArray[(int)MicroInstructionCode.IFEQIncPCForLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQIncPCForLow,
+            Address = (int)MicroInstructionCode.IFEQLoadLow,
+            B = RegisterSelectSignal.PC,
+            ALU = ALUOperation.IncrementB,
+            C = 1 << (int)RegisterLoadSignal.PC,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 8: MAR ← PC
+        microCodeControlArray[(int)MicroInstructionCode.IFEQLoadLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQLoadLow,
+            Address = (int)MicroInstructionCode.IFEQReadLow,
+            B = RegisterSelectSignal.PC,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 9: MBR ← M[MAR]
+        microCodeControlArray[(int)MicroInstructionCode.IFEQReadLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQReadLow,
+            Address = (int)MicroInstructionCode.IFEQCheckZero,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadByteToMBR,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 10: Conditional jump if H == 0
+        microCodeControlArray[(int)MicroInstructionCode.IFEQCheckZero] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQCheckZero,
+            Address = (int)MicroInstructionCode.IFEQSkipOperandsAndReturn,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.PassA,
+            C = 0,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.JAMZ_EQ,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        // Step 11: Default PC += 1 if not jumping
+        microCodeControlArray[(int)MicroInstructionCode.IFEQSkipOperandsAndReturn] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFEQSkipOperandsAndReturn,
+            Address = ((int)MicroInstructionCode.IFEQSkipOperandsAndReturn) +1, // Jumping to a routine that loads the TOS here
+            B = RegisterSelectSignal.PC,
+            ALU = ALUOperation.IncrementB,
+            C = 1 << (int)RegisterLoadSignal.PC,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFEQ)
+        };
+
+        GenerateReloadTOS(microCodeControlArray, ((int)MicroInstructionCode.IFEQSkipOperandsAndReturn) + 1,
+            nameof(OpCode.IFEQ));
+
+        // Step 1: MAR ← SP
+        microCodeControlArray[(int)MicroInstructionCode.IFNELoadTop] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNELoadTop,
+            Address = (int)MicroInstructionCode.IFNEReadTopHigh,
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 2: Read high 16 bits
+        microCodeControlArray[(int)MicroInstructionCode.IFNEReadTopHigh] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEReadTopHigh,
+            Address = (int)MicroInstructionCode.IFNEAdd2ToMAR,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRHigh,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 3: MAR += 2
+        microCodeControlArray[(int)MicroInstructionCode.IFNEAdd2ToMAR] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEAdd2ToMAR,
+            Address = (int)MicroInstructionCode.IFNEReadTopLow,
+            B = RegisterSelectSignal.MAR,
+            ALU = ALUOperation.IncrementBBy2,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 4: Read low 16 bits
+        microCodeControlArray[(int)MicroInstructionCode.IFNEReadTopLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEReadTopLow,
+            Address = (int)MicroInstructionCode.IFNEStoreTopInH,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 5: H ← MDR
+        microCodeControlArray[(int)MicroInstructionCode.IFNEStoreTopInH] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEStoreTopInH,
+            Address = (int)MicroInstructionCode.IFNEIncrementSP,
+            B = RegisterSelectSignal.MDR,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.H,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 6: SP ← SP + 4
+        microCodeControlArray[(int)MicroInstructionCode.IFNEIncrementSP] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEIncrementSP,
+            Address = (int)MicroInstructionCode.IFNEIncPCForLow,
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.IncrementBBy4,
+            C = 1 << (int)RegisterLoadSignal.SP,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 7: PC ← PC + 1 (fetch offset)
+        microCodeControlArray[(int)MicroInstructionCode.IFNEIncPCForLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEIncPCForLow,
+            Address = (int)MicroInstructionCode.IFNELoadLow,
+            B = RegisterSelectSignal.PC,
+            ALU = ALUOperation.IncrementB,
+            C = 1 << (int)RegisterLoadSignal.PC,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 8: MAR ← PC
+        microCodeControlArray[(int)MicroInstructionCode.IFNELoadLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNELoadLow,
+            Address = (int)MicroInstructionCode.IFNEReadLow,
+            B = RegisterSelectSignal.PC,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 9: MBR ← M[MAR]
+        microCodeControlArray[(int)MicroInstructionCode.IFNEReadLow] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNEReadLow,
+            Address = (int)MicroInstructionCode.IFNECheckZero,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadByteToMBR,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 10: Conditional jump if H == 0
+        microCodeControlArray[(int)MicroInstructionCode.IFNECheckZero] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNECheckZero,
+            Address = (int)MicroInstructionCode.IFNESkipOperandsAndReturn,
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.PassA,
+            C = 0,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.JAMZ_NE,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        // Step 11: Default PC += 1 if not jumping
+        microCodeControlArray[(int)MicroInstructionCode.IFNESkipOperandsAndReturn] = new MicroInstruction
+        {
+            Key = MicroInstructionCode.IFNESkipOperandsAndReturn,
+            Address = ((int)MicroInstructionCode.IFNESkipOperandsAndReturn) +1, // Jumping to a routine that loads the TOS here
+            B = RegisterSelectSignal.PC,
+            ALU = ALUOperation.IncrementB,
+            C = 1 << (int)RegisterLoadSignal.PC,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = nameof(OpCode.IFNE)
+        };
+
+        GenerateReloadTOS(microCodeControlArray, ((int)MicroInstructionCode.IFNESkipOperandsAndReturn) + 1,
+            nameof(OpCode.IFNE));
+
         AddJumpInstructions(microCodeControlArray);
 
         LoadJumpTable(microCodeControlArray);
@@ -721,12 +903,220 @@ public static class MicroCodeStoreBuilder
         return microCodeControlArray;
     }
 
+    private static MicroInstruction[] CreateInitialisedArray()
+    {
+        var microCodeControlArray = new MicroInstruction[SimulatorConstants.MicroCode.StoreSize];
+
+        for (var i = 0; i < SimulatorConstants.MicroCode.StoreSize; i++)
+        {
+            microCodeControlArray[i] = new MicroInstruction(); 
+        }
+
+        return microCodeControlArray;
+    }
+
+
     private static void LoadJumpTable(MicroInstruction[] microCodeControlArray)
     {
         for (var i = (int)MicroInstructionCode.JUMPTableStart; i <= (int)MicroInstructionCode.JUMPTableEnd; i++)
         {
             microCodeControlArray[i] = microCodeControlArray[(int)MicroInstructionCode.JUMPDecrementPC];
         }
+    }
+
+    private static void RegisterBinaryStackOpSequence(
+        MicroInstruction[] microCodeControlArray,
+        MicroInstructionCode startIndex,
+        MicroInstructionCode nextIndex,
+        string opcodeName,
+        ALUOperation aluCompute
+    )
+    {
+        // Second instruction is in a different place in the code store
+        var step = (int)nextIndex;
+
+        microCodeControlArray[(int)startIndex] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(startIndex),
+            Name = $"{opcodeName}CopyTOSToH",
+            B = RegisterSelectSignal.TOS,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.H,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}PopTOS",
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.IncrementBBy4,
+            C = 1 << (int)RegisterLoadSignal.SP,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}SetMARToSP",
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}ReadHighWordA",
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRHigh,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}IncMARForLowWordA",
+            B = RegisterSelectSignal.MAR,
+            ALU = ALUOperation.IncrementBBy2,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}ReadLowWordA",
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}PopSecondOperand",
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.IncrementBBy4,
+            C = 1 << (int)RegisterLoadSignal.SP,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+        
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}ComputeResult",
+            B = RegisterSelectSignal.MDR,
+            ALU = aluCompute,
+            C = 1 << (int)RegisterLoadSignal.MDR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}DecrementSPForPush",
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.DecrementBBy4,
+            C = 1 << (int)RegisterLoadSignal.SP,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}SetMARForResultWrite",
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}WriteHighResult",
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.WriteWordFromMDRHigh,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}IncMARForLowResult",
+            B = RegisterSelectSignal.MAR,
+            ALU = ALUOperation.IncrementBBy2,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}WriteLowResult",
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.WriteWordFromMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Key = (MicroInstructionCode)(step - 1),
+            Name = $"{opcodeName}UpdateTOSWithResult",
+            B = RegisterSelectSignal.MDR,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.TOS,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opcodeName,
+            Address = (int)MicroInstructionCode.FETCHStartFetchDecode
+        };
     }
 
     private static void AddJumpInstructions(MicroInstruction[] microCodeControlArray)
@@ -786,7 +1176,7 @@ public static class MicroCodeStoreBuilder
             B = RegisterSelectSignal.PC,
             ALU = ALUOperation.PassB,
             C = 1 << (int)RegisterLoadSignal.MAR,
-            MEM = MemoryOperation.ReadByteToMBR, 
+            MEM = MemoryOperation.ReadByteToMBR,
             JAM = (byte)JAMControl.None,
             OpCode = "BRANCH"
         };
@@ -794,13 +1184,86 @@ public static class MicroCodeStoreBuilder
         microCodeControlArray[(int)MicroInstructionCode.JUMPCombineOffset] = new MicroInstruction
         {
             Key = MicroInstructionCode.JUMPCombineOffset,
-            Address = (int)MicroInstructionCode.FETCHStartFetchDecode,
+            Address = ((int)MicroInstructionCode.JUMPCombineOffset) + 1,
             B = RegisterSelectSignal.MBR,
             ALU = ALUOperation.CombineOffset,
             C = 1 << (int)RegisterLoadSignal.PC,
             MEM = MemoryOperation.NoOp,
             JAM = (byte)JAMControl.None,
             OpCode = "BRANCH"
+        };
+
+        GenerateReloadTOS(microCodeControlArray, ((int)MicroInstructionCode.JUMPCombineOffset) + 1,
+            "BRANCH");
+    }
+
+    public static void GenerateReloadTOS(MicroInstruction[] microCodeControlArray, int startIndex, string opCodeName)
+    {
+        var step = startIndex;
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Name = $"{opCodeName}ReloadTOS_SetMAR",
+            Key = (MicroInstructionCode)(step - 1),
+            B = RegisterSelectSignal.SP,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opCodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Name = $"{opCodeName}ReloadTOS_ReadHigh",
+            Key = (MicroInstructionCode)(step - 1),
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRHigh,
+            JAM = (byte)JAMControl.None,
+            OpCode = opCodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Name = $"{opCodeName}ReloadTOS_IncMAR",
+            Key = (MicroInstructionCode)(step - 1),
+            B = RegisterSelectSignal.MAR,
+            ALU = ALUOperation.IncrementBBy2,
+            C = 1 << (int)RegisterLoadSignal.MAR,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opCodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Name = $"{opCodeName}ReloadTOS_ReadLow",
+            Key = (MicroInstructionCode)(step - 1),
+            B = RegisterSelectSignal.None,
+            ALU = ALUOperation.Nop,
+            C = 0,
+            MEM = MemoryOperation.ReadWordToMDRLow,
+            JAM = (byte)JAMControl.None,
+            OpCode = opCodeName,
+            Address = step
+        };
+
+        microCodeControlArray[step++] = new MicroInstruction
+        {
+            Name = $"{opCodeName}ReloadTOS_SetTOS",
+            Key = (MicroInstructionCode)(step - 1),
+            B = RegisterSelectSignal.MDR,
+            ALU = ALUOperation.PassB,
+            C = 1 << (int)RegisterLoadSignal.TOS,
+            MEM = MemoryOperation.NoOp,
+            JAM = (byte)JAMControl.None,
+            OpCode = opCodeName,
+            Address = (int)MicroInstructionCode.FETCHStartFetchDecode
         };
     }
 }

@@ -6,6 +6,8 @@ using Bus;
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct MicroInstruction
 {
+    private readonly string? _name;
+    
     public MicroInstruction()
     {
         Address = (int)MicroInstructionCode.Uninitialised;
@@ -35,7 +37,11 @@ public readonly struct MicroInstruction
 
     public MicroInstructionCode Key { get; init; }
 
-    public string Name => Key.ToString();
+    public string Name
+    {
+        get => _name ?? Key.ToString();
+        init => _name = value;
+    }
 
     public string? OpCode { get; init; }
 

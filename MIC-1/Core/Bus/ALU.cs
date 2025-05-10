@@ -5,13 +5,14 @@ using MicroCode;
 
 public static class ALU
 {
-    public static bool IsZero { get; private set; }
-    public static bool IsNegative { get; private set; }
+    public static bool IsZero;
+
+    public static bool IsNegative;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int Calculate(Registers registers, MicroInstruction mi)
+    public static int Calculate(MicroInstruction mi)
     {
-        var a = registers.H;
+        var a = Registers.H;
 
         // Fast path for extremely common ops that don’t require both inputs
         switch (mi.ALU)
@@ -33,17 +34,29 @@ public static class ALU
                 return 0;
 
             case ALUOperation.SignExtend8:
-                int extended = (sbyte)(GetBInput(registers, mi.B) & 0xFF);
+                int extended = (sbyte)(GetBInput(mi.B) & 0xFF);
                 SetFlags(extended);
                 return extended;
         }
 
         // Load B only when needed
-        var b = GetBInput(registers, mi.B);
+        var b = GetBInput(mi.B);
         int result;
 
         switch (mi.ALU)
         {
+            case ALUOperation.AAndB:
+                result = a & b;
+                break;
+
+            case ALUOperation.AOrB:
+                result = a | b;
+                break;
+
+            case ALUOperation.AXorB:
+                result = a ^ b;
+                break;
+            
             case ALUOperation.PassB:
                 result = b;
                 break;
@@ -94,7 +107,7 @@ public static class ALU
 
             case ALUOperation.CombineOffset:
                 var offset = (short)(((a & 0xFF) << 8) | (b & 0xFF));
-                result = registers.PC + offset;
+                result = Registers.PC + offset;
                 break;
 
             case ALUOperation.CombineHighLow:
@@ -144,20 +157,20 @@ public static class ALU
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int GetBInput(Registers registers, RegisterSelectSignal selector)
+    private static int GetBInput(RegisterSelectSignal selector)
     {
         return selector switch
         {
-            RegisterSelectSignal.PC => registers.PC,
-            RegisterSelectSignal.SP => registers.SP,
-            RegisterSelectSignal.MAR => registers.MAR,
-            RegisterSelectSignal.MBR => registers.MBR,
-            RegisterSelectSignal.MDR => registers.MDR,
-            RegisterSelectSignal.H => registers.H,
-            RegisterSelectSignal.LV => registers.LV,
-            RegisterSelectSignal.CPP => registers.CPP,
-            RegisterSelectSignal.TOS => registers.TOS,
-            RegisterSelectSignal.OPC => registers.OPC,
+            RegisterSelectSignal.PC => Registers.PC,
+            RegisterSelectSignal.SP => Registers.SP,
+            RegisterSelectSignal.MAR => Registers.MAR,
+            RegisterSelectSignal.MBR => Registers.MBR,
+            RegisterSelectSignal.MDR => Registers.MDR,
+            RegisterSelectSignal.H => Registers.H,
+            RegisterSelectSignal.LV => Registers.LV,
+            RegisterSelectSignal.CPP => Registers.CPP,
+            RegisterSelectSignal.TOS => Registers.TOS,
+            RegisterSelectSignal.OPC => Registers.OPC,
             _ => 0
         };
     }

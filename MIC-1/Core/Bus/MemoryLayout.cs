@@ -10,7 +10,7 @@ public static class MemoryLayout
         {
             >= CodeSegment.Start and <= CodeSegment.End => MemoryRegion.Program,
             >= DataSegment.Start and <= DataSegment.End => MemoryRegion.Data,
-            >= StackSegment.Start and <= StackSegment.End => MemoryRegion.Stack,
+            >= StackSegment.Bottom and <= StackSegment.Top => MemoryRegion.Stack,
             _ => throw new ArgumentOutOfRangeException(nameof(address), $"Invalid memory address: 0x{address:X4}")
         };
 
@@ -32,7 +32,7 @@ public static class MemoryLayout
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsInStack(int address)
     {
-        return address is >= StackSegment.Start and <= StackSegment.End;
+        return address is >= StackSegment.Bottom and <= StackSegment.Top;
     }
 
     public static class CodeSegment
@@ -49,7 +49,7 @@ public static class MemoryLayout
 
     public static class StackSegment
     {
-        public const int End = 0xFFFF;
-        public const int Start = 0xC000;
+        public const int Top = 0xFFFF;
+        public const int Bottom = 0xC000;
     }
 }

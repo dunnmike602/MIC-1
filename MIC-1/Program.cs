@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Runtime.InteropServices;
+using Controller;
 using Core;
+using Core.Bus;
 using Core.Constants;
 using Core.Events;
 using Core.IJVM;
@@ -28,11 +30,11 @@ public class Program
 #endif
 
 
-    public static async Task Main(string[] args)
+    public static void Main(string[] args)
     {
         try
         {
-            await RunSimulator();
+            RunSimulator();
         }
         catch (Exception e)
         {
@@ -40,7 +42,7 @@ public class Program
         }
     }
 
-    private static void WriteStatusLine(string label, string value, float speed)
+    private static void WriteStatusLine(string label, string? value, float speed)
     {
         Console.ForegroundColor = ConsoleColor.Green;
         Console.Write($"\r{label}: {value,-20}");
@@ -49,47 +51,39 @@ public class Program
         Console.ResetColor();
     }
 
-    private static async Task RunSimulator()
+    private static void RunSimulator()
     {
-        using var mic1 = new MIC1Simulator(false, unThrottled: true, memoryChecking: false, showDetailedStats: false);
+        using var emulatorCts = new CancellationTokenSource();
+        using var mic1 = new MIC1Simulator(unThrottled: true,
+            memoryChecking: false, showDetailedStats: false, enableExecutionEvents:false);
 
-        //    HandleNormalEvents(mic1);
+        // take a snapshot of the token so we don’t capture emulatorCts
+        var token = emulatorCts.Token;
 
-        //   HandleTraps(mic1);
+        // take a snapshot of the emulator so we don’t capture the field/outer var
+        var runner = mic1;
 
         try
         {
-            for (var i = 0; i < 2500; i++)
-            {
-                mic1.Init(true);
+            LoadAddTest(mic1);
 
-                LoadIFEQTest(mic1);
-          
-                await Task.Run(() => mic1.Run(pc: 1000));
+            // the lambda now only closes over `runner` and `token`
+            var micTask = Task.Run(() => runner.Run(token, pc: 1000), token);
 
-                var cycleCount = mic1.CycleCount;
-                var iJVMCycleCount = mic1.IJVMCycleCount;
-                var elapsedTicks = mic1.TotalElapsedTime.ElapsedTicks;
-                var elapsedSeconds = mic1.TotalElapsedTime.ElapsedMilliseconds * 1000;
-             
-                var total = (cycleCount /
-                             ((float)elapsedTicks / Stopwatch.Frequency));
+            var app = new Mic1Controller(mic1);
+            app.Run();
 
-                Console.WriteLine($"SPEED=" + total / 1e6);
-               // PrintStats(mic1, cycleCount, iJVMCycleCount, elapsedSeconds, elapsedTicks);
-            }
+            emulatorCts.Cancel();
+            micTask.Wait(emulatorCts.Token);
         }
         catch (Exception e)
         {
             Console.WriteLine(e);
             throw;
         }
-
-
-        // TestCores(mic1);
     }
 
-    private static void TestCores(MIC1Simulator mic1)
+/*    private static void TestCores(MIC1Simulator mic1)
     {
         var logicalProcessorCount = Environment.ProcessorCount;
         Console.WriteLine($"Running on {logicalProcessorCount} logical processors.");
@@ -115,7 +109,7 @@ public class Program
             //PrintStats(mic1, (uint?)core);
         }
     }
-
+*/
     private static void HandleTraps(MIC1Simulator mic1)
     {
         var client = new LogPipeClient();
@@ -123,7 +117,7 @@ public class Program
 
         if (clientConnected)
         {
-            mic1.Trap += (sender, args) =>
+            mic1.TrapEvent += (sender, args) =>
             {
                 client.SendLog($"{args.TrapCode}: {args.Message}");
                 client.SendLog(string.Empty);
@@ -145,17 +139,86 @@ public class Program
             {
                 var processorSpeed = batch.Last().CycleCount /
                                      ((float)batch.Last().ElapsedTicks / Stopwatch.Frequency);
-                WriteStatusLine("Started:", batch.Last().Instruction.Key.ToString(), processorSpeed / 1000);
+                WriteStatusLine("Started:", batch.Last().Instruction?.Key.ToString(), processorSpeed / 1000000);
             });
 
         // Hook the actual event to push to subject
-        mic1.ExecutionStarted += (sender, args) => ExecutionSubject.OnNext(args);
+        mic1.ExecutionEvent += (sender, args) => ExecutionSubject.OnNext(args);
     }
 
+    private static void LoadISUBTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.SETSP,
+            0xFF,              
+            0xFF,
+            (byte)OpCode.BIPUSH,
+            15,
+            (byte)OpCode.BIPUSH,
+            8,
+            (byte)OpCode.ISUB,
+            (byte)OpCode.HALT
+        );
+        // @formatter:on
+    }
+
+    private static void LoadNOPTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.NOP,    // 1000 - DO NOTHING
+            (byte)OpCode.NOP,    // 1001 - DO NOTHING
+            (byte)OpCode.HALT    // 1002 - done
+        );
+        // @formatter:on
+    }
+
+
+    private static void LoadBIPUSHTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.BIPUSH,    // 1000 - Push 100
+            120,                    // 1001
+            (byte)OpCode.HALT       // 1002 - done
+        );
+        // @formatter:on
+    }
+
+    private static void LoadAddTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.SETSP,     // 1000 - Set the stack pointer
+            0xFF,                   // 1001 - high byte
+            0xFF,                   // 1002 - low byte
+
+            (byte)OpCode.BIPUSH,    // 1003 - Push 100
+            120,                    // 1004
+
+            (byte)OpCode.BIPUSH,    // 1005 - Push -1
+            0x5,                    // 1006 
+            (byte)OpCode.IADD,
+            (byte)OpCode.GOTO,      // Add and push back
+            0xFF, // high byte
+            0xF6, // low byte 
+            (byte)OpCode.HALT       // 1008 - done
+        );
+    }
+
+    private static void LoadTrapTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            1   
+        );
+    }
+    
     private static void LoadIFEQTest(MIC1Simulator mic1)
     {
         // @formatter:off
-        mic1.Memory.LoadProgram(1000,
+        Memory.LoadBootProgram(1000,
             (byte)OpCode.SETSP,     // 1000 - Set the stack pointer
             0xFF,                   // 1001 - high byte
             0xFF,                   // 1002 - low byte
@@ -185,10 +248,88 @@ public class Program
         // @formatter:on
     }
 
+    private static void LoadANDTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.BIPUSH,    // Push 00001111 (binary)   
+            0x0F,
+            (byte)OpCode.BIPUSH,
+            0xF1,                   // Push 00001111 (binary)   
+
+            (byte)OpCode.IAND,
+
+            (byte)OpCode.HALT       // 1015 - done
+        );
+        // @formatter:on
+    }
+
+    private static void LoadORTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.BIPUSH,    // Push 00001111 (binary)   
+            0xF0,
+            (byte)OpCode.BIPUSH,
+            0x0F,                   // Push 00001111 (binary)   
+
+            (byte)OpCode.IOR,
+
+            (byte)OpCode.HALT       // 1015 - done
+        );
+        // @formatter:on
+    }
+
+    private static void LoadXORTest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.BIPUSH,    // Push 00001111 (binary)   
+            0b111,
+            (byte)OpCode.BIPUSH,
+            0b111,                   // Push 00001111 (binary)   
+
+            (byte)OpCode.IXOR,
+
+            (byte)OpCode.HALT       // 1015 - done
+        );
+        // @formatter:on
+    }
+
+    private static void LoadIFNETest(MIC1Simulator mic1)
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+              (byte)OpCode.SETSP,     // 1000 - Set the stack pointer
+              0xFF,                   // 1001 - high byte
+              0xFB,                   // 1002 - low byte, need a dummy value for FETCH
+
+              (byte)OpCode.BIPUSH,     // 1003 - Push 120
+              120,
+
+              // Label: LoopStart
+              (byte)OpCode.DUP,        // 1005 - duplicate top of stack
+
+              (byte)OpCode.BIPUSH,     // 1006 - Push -1
+              0xFF,                    // 1007 - two's complement of -1
+
+              (byte)OpCode.IADD,       // 1008 - counter + (-1)
+
+              (byte)OpCode.DUP,        // 1009 - duplicate new top of stack (after decrement)
+
+              (byte)OpCode.IFNE,       // 1010 - if TOS != 0, jump back to LoopStart (0x1005)
+              0xFF,                    // 1011 - high byte of offset (-11)
+              0xF5,                    // 1012 - low byte of offset
+
+              (byte)OpCode.HALT        // 1013 - done
+          );
+        // @formatter:on
+    }
+
     private static void LoadStackTest(MIC1Simulator mic1)
     {
         // @formatter:off
-        mic1.Memory.LoadProgram(1000,
+        Memory.LoadBootProgram(1000,
             (byte)OpCode.SETSP,   // 0xD000 - Set the stack pointer
             0xFF,                 // 0xD001 - high byte
             0xFF,                 // 0xD002 - low byte
@@ -203,7 +344,8 @@ public class Program
         // @formatter:on
     }
 
-    private static void PrintStats(MIC1Simulator mic1, long cycleCount, long iJVMCycleCount, long totalSeconds, long elapsedTicks, uint? core = null)
+    private static void PrintStats(MIC1Simulator mic1, long cycleCount, long iJVMCycleCount, float totalSeconds,
+        long elapsedTicks, uint? core = null)
     {
         core ??= GetCurrentCore();
 
@@ -213,14 +355,15 @@ public class Program
         Console.WriteLine("{0,-30} {1:N0}", "Running on Core:", core);
         Console.WriteLine("{0,-30} {1:N0}", "Total Microcode Cycles:", cycleCount);
         Console.WriteLine("{0,-30} {1:N0}", "Total IJVM Cycles:", iJVMCycleCount);
-        Console.WriteLine("{0,-30} {1:F3} sec", "Total elapsed time:", totalSeconds);
+        Console.WriteLine("{0,-30} {1:F6} sec", "Total elapsed time:", totalSeconds);
 
         var effectiveHz = cycleCount /
                           ((float)elapsedTicks / Stopwatch.Frequency);
 
         Console.WriteLine("{0,-30} {1:N0} ({2:F3} MHz)", "Effective μInstr/sec:", effectiveHz,
             effectiveHz / 1e6);
-        Console.WriteLine("{0,-30} {1:N0} MHz", "Target speed MHZ:", SimulatorConstants.DefaultTargetFrequencyHz / 1e6);
+        Console.WriteLine("{0,-30} {1:N0} MHz", "Target speed MHZ:",
+            SimulatorConstants.Machine.DefaultTargetFrequencyHz / 1e6);
 
         Console.WriteLine();
 
@@ -238,14 +381,14 @@ public class Program
         Console.WriteLine("-------------------------------------------------------------------");
     }
 
- 
-#if WINDOWS
-        private static uint GetCurrentCore()
-        {
-            var core = GetCurrentProcessorNumber();
 
-            return core;
-        }
+#if WINDOWS
+    private static uint GetCurrentCore()
+    {
+        var core = GetCurrentProcessorNumber();
+
+        return core;
+    }
 
 #elif LINUX
        public static uint GetCurrentCore()
@@ -258,7 +401,4 @@ public class Program
         return (uint)core;
     }
 #endif
-
-
-
 }

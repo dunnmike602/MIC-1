@@ -6,17 +6,17 @@ using Exceptions;
 using MicroCode;
 using static MemoryLayout;
 
-public sealed unsafe class Memory : IDisposable
+public static unsafe class Memory
 {
-    private readonly bool _memoryChecking;
-    
-    private readonly byte[] _buffer;
-    
-    private GCHandle _handle;
-    
-    private readonly byte* _ptr;
+    private static bool _memoryChecking;
 
-    public Memory(int size, bool memoryChecking)
+    internal static byte[]? MemoryBuffer;
+
+    private static GCHandle _handle;
+
+    private static byte* _ptr;
+
+    public static void Init(int size, bool memoryChecking)
     {
         if (size <= 0)
         {
@@ -24,24 +24,22 @@ public sealed unsafe class Memory : IDisposable
         }
 
         _memoryChecking = memoryChecking;
-        _buffer = new byte[size];
-        _handle = GCHandle.Alloc(_buffer, GCHandleType.Pinned);
+        MemoryBuffer = new byte[size];
+        _handle = GCHandle.Alloc(MemoryBuffer, GCHandleType.Pinned);
         _ptr = (byte*)_handle.AddrOfPinnedObject();
     }
 
-    public bool AllowExecuteFromData = false;
+    public static bool AllowExecuteFromData = false;
 
-    public bool AllowExecuteFromStack = false;
-   
-    private bool _disposed;
+    public static bool AllowExecuteFromStack = false;
 
-    public int Size => _buffer.Length;
+    public static int Size => MemoryBuffer!.Length;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Access(Registers registers, MicroInstruction mi)
+    public static void Access(MicroInstruction mi)
     {
         var op = mi.MEM;
-        var mar = registers.MAR;
+        var mar = Registers.MAR;
 
         switch (op)
         {
@@ -51,16 +49,16 @@ public sealed unsafe class Memory : IDisposable
             case MemoryOperation.ReadWordToMDRHigh:
                 CheckBoundsForWord(mar);
             {
-                ushort high = (ushort)((_ptr[mar] << 8) | _ptr[mar + 1]);
-                registers.MDR = (registers.MDR & 0x0000FFFF) | (high << 16);
+                var high = (ushort)((_ptr[mar] << 8) | _ptr[mar + 1]);
+                Registers.MDR = (Registers.MDR & 0x0000FFFF) | (high << 16);
             }
                 break;
 
             case MemoryOperation.ReadWordToMDRLow:
                 CheckBoundsForWord(mar);
             {
-                ushort low = (ushort)((_ptr[mar] << 8) | _ptr[mar + 1]);
-                registers.MDR = (int)((registers.MDR & 0xFFFF0000) | low);
+                var low = (ushort)((_ptr[mar] << 8) | _ptr[mar + 1]);
+                Registers.MDR = (int)((Registers.MDR & 0xFFFF0000) | low);
             }
                 break;
 
@@ -70,10 +68,11 @@ public sealed unsafe class Memory : IDisposable
                 {
                     ValidateSegment(mar);
                 }
+
             {
-                ushort high = (ushort)(registers.MDR >> 16);
+                var high = (ushort)(Registers.MDR >> 16);
                 _ptr[mar] = (byte)(high >> 8);
-                _ptr[mar + 1] = (byte)(high);
+                _ptr[mar + 1] = (byte)high;
             }
                 break;
 
@@ -83,39 +82,40 @@ public sealed unsafe class Memory : IDisposable
                 {
                     ValidateSegment(mar);
                 }
+
             {
-                ushort low = (ushort)(registers.MDR & 0xFFFF);
+                var low = (ushort)(Registers.MDR & 0xFFFF);
                 _ptr[mar] = (byte)(low >> 8);
-                _ptr[mar + 1] = (byte)(low);
+                _ptr[mar + 1] = (byte)low;
             }
                 break;
 
 
             case MemoryOperation.ReadByteToMBR:
                 CheckBoundsForByte(mar);
-                
+
                 if (_memoryChecking)
                 {
                     ValidateExecutionSegment(mar, mi.Key == MicroInstructionCode.FETCHReadInstruction);
                 }
 
-                registers.MBR = _ptr[mar];
+                Registers.MBR = _ptr[mar];
                 break;
 
-           case MemoryOperation.WriteByteFromMBR:
+            case MemoryOperation.WriteByteFromMBR:
                 CheckBoundsForByte(mar);
                 if (_memoryChecking)
                 {
                     ValidateSegment(mar);
                 }
 
-                _ptr[mar] = registers.MBR;
+                _ptr[mar] = Registers.MBR;
                 break;
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void LoadProgram(int startAddress, params byte[] values)
+    public static void LoadBootProgram(int startAddress, params byte[] values)
     {
         for (var i = 0; i < values.Length; i++)
         {
@@ -124,25 +124,25 @@ public sealed unsafe class Memory : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void CheckBoundsForByte(int address)
-    { 
-        if (address < 0 || address >= Size)
+    private static void CheckBoundsForByte(int address)
+    {
+        if (address < 0 || address > Size)
         {
             throw new MemoryFaultException(address, false);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void CheckBoundsForWord(int address)
+    private static void CheckBoundsForWord(int address)
     {
-        if (address < 0 || address + 1 >= Size)
+        if (address < 0 || address + 1 > Size)
         {
             throw new MemoryFaultException(address, true);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ValidateExecutionSegment(int address, bool isInstructionFetch)
+    private static void ValidateExecutionSegment(int address, bool isInstructionFetch)
     {
         if (!isInstructionFetch)
         {
@@ -159,7 +159,7 @@ public sealed unsafe class Memory : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ValidateSegment(int address)
+    private static void ValidateSegment(int address)
     {
         var region = GetRegion(address);
         if (region == MemoryRegion.Program)
@@ -169,10 +169,10 @@ public sealed unsafe class Memory : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public byte ReadByte(int address, bool isInstructionFetch = false)
+    public static byte ReadByte(int address, bool isInstructionFetch = false)
     {
         CheckBoundsForByte(address);
-        
+
         if (_memoryChecking)
         {
             ValidateExecutionSegment(address, isInstructionFetch);
@@ -182,16 +182,16 @@ public sealed unsafe class Memory : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int ReadWord(int address)
+    public static int ReadWord(int address)
     {
         CheckBoundsForWord(address);
 
         return (_ptr[address] << 8) |
-               (_ptr[address + 1]);
+               _ptr[address + 1];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void WriteByte(int address, byte value)
+    public static void WriteByte(int address, byte value)
     {
         CheckBoundsForByte(address);
 
@@ -204,7 +204,7 @@ public sealed unsafe class Memory : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void WriteWord(int address, int value)
+    public static void WriteWord(int address, int value)
     {
         CheckBoundsForWord(address);
 
@@ -217,59 +217,25 @@ public sealed unsafe class Memory : IDisposable
         _ptr[address + 1] = (byte)value;
     }
 
-    public string[] DumpStackMemory(int sp)
-    {
-        var stackDump = new List<string>();
-        for (var address = StackSegment.End; address >= StackSegment.Start; address--)
-        {
-            var value = _ptr[address];
-            var label = address == sp ? "-> SP" : "";
-            stackDump.Add($"{address:D5}-{address:X4}: 0x{value:X2} {label}");
-        }
-
-        return stackDump.ToArray();
-    }
-    
-    ~Memory()
-    {
-        Dispose(false); // Finalizer just calls Dispose(false)
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Dispose()
+    public static void Dispose()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Dispose(bool disposing)
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
         if (_handle.IsAllocated)
         {
             _handle.Free();
         }
-
-        _disposed = true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private MemoryRegion GetRegion(int address)
+    private static MemoryRegion GetRegion(int address)
     {
         var returnValue = address switch
         {
-            >= StackSegment.Start and <= StackSegment.End => MemoryRegion.Stack,
-            < StackSegment.Start => MemoryRegion.Program,
+            >= StackSegment.Bottom and <= StackSegment.Top => MemoryRegion.Stack,
+            < StackSegment.Bottom => MemoryRegion.Program,
             _ => MemoryRegion.Data
         };
 
         return returnValue;
     }
-
-
 }

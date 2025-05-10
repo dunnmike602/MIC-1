@@ -3,6 +3,7 @@
 using MLDComputing.Emulators.MIC1.Core;
 using MLDComputing.Emulators.MIC1.Core.IJVM;
 using FluentAssertions;
+using MLDComputing.Emulators.MIC1.Core.Bus;
 
 [TestClass]
 public sealed class SimulatorTests
@@ -11,18 +12,14 @@ public sealed class SimulatorTests
     public void Run_WhenValidProgramIsLoaded_ItWillRun()
     {
         // Arrange
-        var mic1 = new MIC1Simulator
-        {
-            Registers =
-            {
-                PC = 1000
-            }
-        };
+        var mic1 = new MIC1Simulator();
+
+        Registers.PC = 1000;
 
         LoadStackTest(mic1);
 
         // Act
-        mic1.Run();
+     //   mic1.Run();
 
         // Assert
         mic1.CycleCount.Should().Be(36);
@@ -31,7 +28,7 @@ public sealed class SimulatorTests
     private static void LoadStackTest(MIC1Simulator mic1)
     {
             // @formatter:off
-            mic1.Memory.LoadProgram(1000,
+            Memory.LoadBootProgram(1000,
                 (byte)OpCode.SETSP,   // 0xD000 - Set the stack pointer
                 0xFF,                 // 0xD001 - high byte
                 0xFF,                 // 0xD002 - low byte

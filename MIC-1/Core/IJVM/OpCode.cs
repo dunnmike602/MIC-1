@@ -4,14 +4,25 @@ namespace MLDComputing.Emulators.MIC1.Core.IJVM;
 
 public enum OpCode : byte
 {
+    NOP = MicroInstructionCode.FETCHStartFetchDecode & 0xFF,
+    
     FETCH = MicroInstructionCode.FETCHStartFetchDecode & 0xFF,
 
     // Push byte onto stack
     BIPUSH = MicroInstructionCode.BIPUSHCopyPCToMar & 0xFF,
 
-    // Pop two words from stack; pusht heir sum
+    // Pop two words from stack; push their sum
     IADD = MicroInstructionCode.IADDLoadFirst & 0xFF,
 
+    // Pop two words from stack; push their sum
+    ISUB = MicroInstructionCode.ISUBLoadFirst & 0xFF,
+
+    IAND = MicroInstructionCode.IANDLoadFirst & 0xFF,
+
+    IOR = MicroInstructionCode.IORLoadFirst & 0xFF,
+
+    IXOR = MicroInstructionCode.IXORLoadFirst & 0xFF,
+    
     // Copy top word on stack and push onto stack
     DUP = MicroInstructionCode.DUPLoadTopAddress & 0xFF,
 
@@ -20,7 +31,10 @@ public enum OpCode : byte
 
     // Branch IF Eq to Zero
     IFEQ = MicroInstructionCode.IFEQLoadTop & 0xFF,
+    
 
+    IFNE = MicroInstructionCode.IFNELoadTop & 0xFF,
+    
     // Reserved for Extension Instructions
 
     // Set Stack Pointer High Byte and Low Byte

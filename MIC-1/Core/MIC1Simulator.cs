@@ -10,6 +10,7 @@ using Extensions;
 using MicroCode;
 using Exceptions;
 using Exceptions.Interfaces;
+using Interop;
 using static Bus.MemoryLayout;
 
 public sealed class MIC1Simulator : IDisposable
@@ -18,15 +19,15 @@ public sealed class MIC1Simulator : IDisposable
 
     private readonly MicroInstruction[] _microCodeControlStore = MicroCodeStoreBuilder.Build();
 
-    public readonly bool CollectInstructionStats;
-
-    public readonly int TargetHz;
+    public readonly int VideoFrameRate;
+    
+    public readonly int TargetProcessorSpeed;
 
     public long[] PerOpcodeCycles = new long[SimulatorConstants.MicroCode.StoreSize];
 
     private bool _executingInstruction;
 
-    public readonly bool ShowDetailedStats;
+    public bool ShowDetailedStats;
 
     public bool UnThrottled;
 
@@ -40,133 +41,246 @@ public sealed class MIC1Simulator : IDisposable
 
     public long InstructionCycleCount;
 
-    public Memory Memory = new(1, false);
+    public long VideoFrameIntervalTicks;
+    
+    public long PipeLineLength;
 
-    public Registers Registers = new();
+    public long FrameCount;
+
+    public long FrameRate;
+
+    public long PerformanceCountInterval;
 
     public Stopwatch TotalElapsedTime = new();
+
+    public Stopwatch TotalElapsedIdleTime = new();
 
     public bool EnableExecutionEvents;
 
     private bool _disposed;
 
-    public event EventHandler<ExecuteEventArgs>? ExecutionStarted;
+    public event EventHandler<ExecuteEventArgs>? ExecutionEvent;
 
-    public event EventHandler<ExecuteEventArgs>? ExecutionEnded;
+    public event EventHandler<TrapEventArgs>? TrapEvent;
 
-    public event EventHandler<TrapEventArgs>? Trap;
+    public event EventHandler<PerfArgs>? PerfEvent;
+    
+    public uint CurrentCore { get; } = MachineHelper.GetCurrentCore();
+
+    public bool HaltDetected
+    {
+        get => _haltDetected;
+        set
+        {
+            _haltDetected = value;
+
+            if (_haltDetected)
+            {
+                TotalElapsedIdleTime.Start();
+                TotalElapsedTime.Stop();
+            }
+            else
+            {
+                TotalElapsedIdleTime.Stop();
+                TotalElapsedTime.Start();
+            }
+        }
+    }
 
     private void OnTrap(TrapCode trapCode, string message, string? information)
     {
-        if (EnableExecutionEvents)
-        {
-            Trap?.Invoke(this, new TrapEventArgs(message, trapCode, information));
-        }
+        TrapEvent?.Invoke(this, new TrapEventArgs(message, trapCode, information, Registers.GetRegisterSnapshot(), DateTime.Now));
     }
 
-    private void OnExecutionStarted(MicroInstruction mi)
+    private void OnExecutionEvent(MicroInstruction? mi, ExecutionEventCode eventCode)
     {
-        if (EnableExecutionEvents)
-        {
-            ExecutionStarted?.Invoke(this,
-                new ExecuteEventArgs(mi, Registers, CycleCount, IJVMCycleCount, TotalElapsedTime.ElapsedTicks));
-        }
+        ExecutionEvent?.Invoke(this,
+            new ExecuteEventArgs(mi, CycleCount, IJVMCycleCount, TotalElapsedTime.ElapsedTicks, eventCode));
     }
 
-    private void OnExecutionEnded(MicroInstruction mi)
+    private void OnPerfEvent(DateTime dateTime, long cycleCount, long processorTick)
     {
-        if (EnableExecutionEvents)
-        {
-            ExecutionEnded?.Invoke(this,
-                new ExecuteEventArgs(mi, Registers, CycleCount, IJVMCycleCount, TotalElapsedTime.ElapsedTicks));
-        }
+        PerfEvent?.Invoke(this,
+            new PerfArgs(dateTime, cycleCount, processorTick));
     }
-
-    public MIC1Simulator(bool enableExecutionEvents = true, int memorySize = SimulatorConstants.DefaultMemorySize,
-        int targetHz = SimulatorConstants.DefaultTargetFrequencyHz,
-        bool unThrottled = false, bool memoryChecking = true,
-        bool collectInstructionStats = true, bool showDetailedStats = true)
+    
+    public MIC1Simulator(bool enableExecutionEvents = true, 
+        int memorySize = SimulatorConstants.Machine.DefaultMemorySize,
+        int targetProcessorSpeed = SimulatorConstants.Machine.DefaultTargetFrequencyHz, 
+        int videoFrameRate = SimulatorConstants.Machine.DefaultRefreshRateHz,
+        bool unThrottled = false, 
+        bool memoryChecking = true,
+        bool showDetailedStats = true,
+        bool inHaltMode = true,
+        int performanceCountInterval = 2)
     {
-        CollectInstructionStats = collectInstructionStats;
-        ShowDetailedStats = showDetailedStats;
-        EnableExecutionEvents = enableExecutionEvents;
-        TargetHz = targetHz;
+        // Machine Setup
         MemorySize = memorySize;
+        VideoFrameRate = videoFrameRate;
+        TargetProcessorSpeed = targetProcessorSpeed;
         UnThrottled = unThrottled;
         MemoryChecking = memoryChecking;
-
-        Init(true);
+        
+        // Dependant variable for machine speed
+        VideoFrameIntervalTicks = (long)((1 / (float)videoFrameRate) * Stopwatch.Frequency);
+        PipeLineLength = GetNumberOfInstructionsPerVideoRefresh();
+        
+        // Stats Setup
+        ShowDetailedStats = showDetailedStats;
+        EnableExecutionEvents = enableExecutionEvents;
+        PerformanceCountInterval = performanceCountInterval;
+        
+        HaltDetected = inHaltMode;
+        
+        Init();
     }
 
-    public void Init(bool clearState)
+    private int GetNumberOfInstructionsPerVideoRefresh()
     {
-        if (clearState)
-        {
-            Registers = new Registers();
-            Memory = new Memory(MemorySize, MemoryChecking);
+        var cyclesPerTick = TargetProcessorSpeed / (float)Stopwatch.Frequency;
 
-            TotalElapsedTime = new Stopwatch();
+        return (int)(cyclesPerTick * VideoFrameIntervalTicks);
+    }
+    
+    public void Init()
+    {
+        Registers.Reset();
+        Memory.Init(MemorySize, MemoryChecking);
 
-            PerOpcodeCycles = new long[SimulatorConstants.MicroCode.StoreSize];
+        PerOpcodeCycles = new long[SimulatorConstants.MicroCode.StoreSize];
 
-            CycleCount = 0;
-            InstructionCycleCount = 0;
-            IJVMCycleCount = 0;
-            _haltDetected = false;
-            TotalElapsedTime.Restart();
-        }
+        CycleCount = 0;
+        FrameCount = 0;
+        InstructionCycleCount = 0;
+        IJVMCycleCount = 0;
     }
 
-    public void Run(bool clearState = false, int pc = 0, params byte[] bytes)
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Run(CancellationToken ct, bool clearState = false, int pc = 0, params byte[] bytes)
     {
         try
         {
-            RunInternal(clearState, pc, bytes);
+            RunInternal(clearState, pc, bytes, ct);
         }
         finally
         {
             Memory.Dispose();
         }
-
     }
 
-    private void RunInternal(bool clearState, int pc, byte[] bytes)
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RunInternal(bool clearState, int pc, byte[] bytes, CancellationToken ct)
     {
-        Init(clearState);
+        if (clearState)
+        {
+            Init();
+        }
+
         Registers.PC = pc;
 
         if (bytes.Length > 0)
         {
-            Memory.LoadProgram(pc, bytes);
+            Memory.LoadBootProgram(pc, bytes);
         }
 
         Registers.MPC = (int)MicroInstructionCode.FETCHStartFetchDecode;
 
-        var ticksPerCycle = Stopwatch.Frequency / TargetHz;
-        var startTicks = Stopwatch.GetTimestamp();
 
-        while (!_haltDetected)
+        var performanceCycleCount = CycleCount;
+        var performanceElapsedTicks = TotalElapsedTime.Elapsed;
+        
+        while (!ct.IsCancellationRequested)
         {
             if (UnThrottled)
             {
-                Execute();
-                continue;
+                if (!_haltDetected)
+                {
+                    RunInUnthrottledMode();
+                }
+                else
+                {
+                    SleepCore();
+                }
+            }
+            else
+            {
+                if (!_haltDetected)
+                {
+                    RunInThrottledMode();
+                }
+                else
+                {
+                    SleepCore();
+                }
             }
 
-            var currentTicks = Stopwatch.GetTimestamp();
-            var elapsedTicks = currentTicks - startTicks;
-            var expectedCycles = elapsedTicks / ticksPerCycle;
-
-            while (CycleCount < expectedCycles && !_haltDetected)
+            if (EnableExecutionEvents && !_haltDetected)
             {
-                Execute();
-            }
+                var sinceLastEvent = TotalElapsedTime.Elapsed - performanceElapsedTicks;
 
-            if (CycleCount >= expectedCycles)
-            {
-                Thread.SpinWait(50); // light CPU back-off
+                if (sinceLastEvent.TotalSeconds >= PerformanceCountInterval)
+                {
+                    OnPerfEvent(DateTime.UtcNow, CycleCount - performanceCycleCount,
+                        sinceLastEvent.Ticks);
+
+                    performanceCycleCount = CycleCount;
+                    performanceElapsedTicks = TotalElapsedTime.Elapsed;
+                }
             }
         }
+
+        TotalElapsedTime.Stop();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RunInThrottledMode()
+    {
+        // Throttled peg to frame rate
+        var frameStartTicks = Stopwatch.GetTimestamp();
+        var cycles = 0;
+        
+        while (cycles <= PipeLineLength & !_haltDetected)
+        {
+            Execute();
+            cycles++;
+        }
+
+        FrameCount++;
+
+        var frameEndTicks = Stopwatch.GetTimestamp();
+        var frameDurationTicks = frameEndTicks - frameStartTicks;
+
+        // Target frame time in ticks (e.g., 60 FPS = 1/60s)
+        var targetTicksPerFrame = (long)(Stopwatch.Frequency / VideoFrameRate);
+        var quantumToWait = targetTicksPerFrame - frameDurationTicks;
+
+        if (quantumToWait > 0)
+        {
+            var waitUntil = Stopwatch.GetTimestamp() + quantumToWait;
+            while (Stopwatch.GetTimestamp() < waitUntil)
+            {
+                Thread.SpinWait(1);
+            }
+        }
+
+        // Optional: calculate actual frame rate
+        var elapsedSeconds = (double)(Stopwatch.GetTimestamp() - frameStartTicks) / Stopwatch.Frequency;
+        FrameRate = (long)(1.0 / elapsedSeconds);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RunInUnthrottledMode()
+    { 
+        Execute();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SleepCore()
+    {
+        // Cycle through waits until processor is started again
+        Thread.Sleep(0);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -180,10 +294,13 @@ public sealed class MIC1Simulator : IDisposable
             next |= 0x100 | Registers.MBR;
         }
 
-        // Check for JAMZ — if enabled and H == 0 (low byte only), OR MBR into MPC
-        if ((mi.JAM & (byte)JAMControl.JAMZ) != 0 && ALU.IsZero)
+        // Check for JAMZ_EQ (Jump if Zero) or JAMZ_NE (Jump if Not Zero)
+        if ((mi.JAM & (byte)JAMControl.JAMZ_EQ) != 0 && ALU.IsZero)
         {
-            // This is start of the jump table that will have 64 bytes set to execute the same instruction
+            next = (int)MicroInstructionCode.JUMPTableStart | (Registers.MBR & 0x3F);
+        }
+        else if ((mi.JAM & (byte)JAMControl.JAMZ_NE) != 0 && !ALU.IsZero)
+        {
             next = (int)MicroInstructionCode.JUMPTableStart | (Registers.MBR & 0x3F);
         }
 
@@ -197,7 +314,7 @@ public sealed class MIC1Simulator : IDisposable
         {
             TrapCode trapCode;
             string message;
-            if (Registers.SP > StackSegment.End)
+            if (Registers.SP > StackSegment.Top)
             {
                 trapCode = TrapCode.StackUnderflow;
                 message = "ABNORMAL TERMINATION - STACK UNDERFLOW DETECTED";
@@ -210,47 +327,58 @@ public sealed class MIC1Simulator : IDisposable
 
             var information =
                 $"SP = 0x{"SP".FormatRegister(Registers.SP, NumberFormat.Hex)} is outside valid stack range " +
-                $"(0x{StackSegment.Start:X4}–0x{StackSegment.End:X4})";
+                $"(0x{StackSegment.Bottom:X4}–0x{StackSegment.Top:X4})";
 
-            OnTrap(trapCode, message, information);
+            if (EnableExecutionEvents)
+            {
+                OnTrap(trapCode, message, information);
+            }
 
-            _haltDetected = true;
+            HaltDetected = true;
         }
 
         if (Registers.MPC != (int)MicroInstructionCode.HALT)
         {
             return;
         }
-
-        OnTrap(TrapCode.Halt, "NORMAL TERMINATION - HALT DETECTED", null);
-
+        
         if (ShowDetailedStats)
         {
             // Processor accounting HALT is a special instruction so it is trapped and logged separately
             IJVMCycleCount++;
         }
 
-        _haltDetected = true;
+        HaltDetected = true;
+
+        if (EnableExecutionEvents)
+        {
+            OnExecutionEvent(null, ExecutionEventCode.Halted);
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void Execute()
     {
-        ref var reg = ref Registers;
-
         fixed (MicroInstruction* pMicroStore = _microCodeControlStore)
         {
-            ref readonly var mi = ref _microCodeControlStore[reg.MPC];
+            ref readonly var mi = ref _microCodeControlStore[Registers.MPC];
 
             if (mi.Key == MicroInstructionCode.Uninitialised)
             {
-                OnTrap(TrapCode.InvalidMicrocodeAddress,
-                    $"ABNORMAL TERMINATION - NO MICROCODE ROUTINE FOUND AT: 0x{Registers.MPC:X2}.", null);
-                _haltDetected = true;
+                if (EnableExecutionEvents)
+                {
+                    OnTrap(TrapCode.InvalidMicrocodeAddress,
+                        $"ABNORMAL TERMINATION - NO MICROCODE ROUTINE FOUND AT: 0x{Registers.MPC:X2}.", null);
+                }
+
+                HaltDetected = true;
                 return;
             }
 
-            OnExecutionStarted(mi);
+            if (EnableExecutionEvents)
+            {
+                OnExecutionEvent(mi, ExecutionEventCode.InstructionStarted);
+            }
 
             // Every time through this execute we do one micro instruction only so that is 1 cycle
             CycleCount++;
@@ -262,19 +390,19 @@ public sealed class MIC1Simulator : IDisposable
 
             CheckForTermination();
 
-            var aluResult = ALU.Calculate(reg, mi);
+            var aluResult = ALU.Calculate(mi);
 
             try
             {
                 if (mi.MemoryAfterRegisterWrite)
                 {
-                    reg.SetRegisterFromALU(aluResult, mi.C);
-                    Memory.Access(Registers, mi);
+                    Registers.SetRegisterFromALU(aluResult, mi.C);
+                    Memory.Access(mi);
                 }
                 else
                 {
-                    Memory.Access(Registers, mi);
-                    reg.SetRegisterFromALU(aluResult, mi.C);
+                    Memory.Access(mi);
+                    Registers.SetRegisterFromALU(aluResult, mi.C);
                 }
             }
             catch (Exception e) when (e is MemoryFaultException or WriteProtectException
@@ -282,14 +410,17 @@ public sealed class MIC1Simulator : IDisposable
             {
                 var trapCode = ((IFaultException)e).TrapCode;
 
-                Trap?.Invoke(this, new TrapEventArgs(e.Message, trapCode, null));
-                _haltDetected = true;
+                TrapEvent?.Invoke(this, new TrapEventArgs(e.Message, trapCode, null, Registers.GetRegisterSnapshot(), DateTime.Now));
+                HaltDetected = true;
                 return;
             }
 
             JumpToNext(mi);
 
-            OnExecutionEnded(mi);
+            if (EnableExecutionEvents)
+            {
+                OnExecutionEvent(mi, ExecutionEventCode.InstructionEnded);
+            }
         }
     }
 
@@ -332,5 +463,15 @@ public sealed class MIC1Simulator : IDisposable
         _disposed = true;
 
         Memory.Dispose();
+    }
+
+    public void Start()
+    {
+        HaltDetected = false;
+
+        if (EnableExecutionEvents)
+        {
+            OnExecutionEvent(null, ExecutionEventCode.Started);
+        }
     }
 }

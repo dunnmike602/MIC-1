@@ -24,4 +24,7 @@ public enum ALUOperation
     IncrementBBy2 = 18,
     IncrementBBy3 = 19,
     DecrementBBy2 = 20,
+    AAndB = 21,
+    AOrB = 22,
+    AXorB = 23,
 }

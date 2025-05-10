@@ -30,6 +30,8 @@
 		<ReadyToRun>true</ReadyToRun>
 		<PublishReadyToRun>true</PublishReadyToRun>
 		<InvariantGlobalization>true</InvariantGlobalization>
+		<PublishTrimmed>true</PublishTrimmed>
+		<TrimMode>link</TrimMode> <!-- or aggressive -->
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -39,6 +41,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <PackageReference Include="ReadLine" Version="2.0.1" />
 	  <PackageReference Include="System.Reactive" Version="6.0.1" />
 	</ItemGroup>
 </Project>
