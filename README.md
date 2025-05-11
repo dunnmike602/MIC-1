@@ -41,19 +41,6 @@ ALU Pipeline: Uses an inline ALU with condition flag tracking and JAM control lo
 
 Event Model: Exposes hooks for real-time execution and debugging tools to observe simulator state and flow.
 
-🖥 Example Use
-csharp
-Copy
-Edit
-var sim = new MIC1Simulator(memorySize: 65536, targetProcessorSpeed: 1_000_000);
-sim.Run(CancellationToken.None, clearState: true, pc: 0x100, bytes: bootProgram);
-You can also subscribe to events:
-
-csharp
-Copy
-Edit
-sim.ExecutionEvent += (s, e) => Console.WriteLine($"Executed: {e.EventCode}, Cycles: {e.CycleCount}");
-sim.TrapEvent += (s, e) => Console.WriteLine($"Trap: {e.TrapCode} - {e.Message}");
 📊 Performance & Profiling
 Targeted performance is configurable (e.g., 1 MHz emulation with 60Hz video sync)
 
