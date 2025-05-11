@@ -98,13 +98,6 @@ IFLT (Branch if top of stack < 0)
 
 IF_ICMPEQ (Compare top two stack values and branch if equal)
 
-🖥 Example Usage
-csharp
-Copy
-Edit
-var sim = new MIC1Simulator(memorySize: 65536, targetProcessorSpeed: 1_000_000);
-sim.Run(CancellationToken.None, clearState: true, pc: 0x100, bytes: bootProgram);
-
 MIC-1 Controller Console
 The project includes a fully interactive command-line controller under the namespace:
 
