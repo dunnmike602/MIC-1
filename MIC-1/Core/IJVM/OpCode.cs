@@ -22,6 +22,12 @@ public enum OpCode : byte
     IOR = MicroInstructionCode.IORLoadFirst & 0xFF,
 
     IXOR = MicroInstructionCode.IXORLoadFirst & 0xFF,
+
+    ISHL = MicroInstructionCode.ISHLLoadFirst & 0xFF,
+
+    ISHR = MicroInstructionCode.ISHRLoadFirst & 0xFF,
+
+    IUSHR = MicroInstructionCode.IUSHRLoadFirst & 0xFF,
     
     // Copy top word on stack and push onto stack
     DUP = MicroInstructionCode.DUPLoadTopAddress & 0xFF,
@@ -40,6 +46,13 @@ public enum OpCode : byte
     // Set Stack Pointer High Byte and Low Byte
     SETSP = MicroInstructionCode.SETSPLoadHigh & 0xFF,
 
+    POP = MicroInstructionCode.POPIncrementSP & 0xFF,
+    
+    SWAP = MicroInstructionCode.POPIncrementSP & 0xFF,
+    
     // Terminate execution of machine
     HALT = MicroInstructionCode.HALT & 0xFF,
+    
+    // Pseudo Instruction for Managing the TOS
+    TOS = MicroInstructionCode.ReloadTOSSetMAR,
 }

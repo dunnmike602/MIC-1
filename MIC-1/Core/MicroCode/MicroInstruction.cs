@@ -20,6 +20,8 @@ public readonly struct MicroInstruction
         OpCode = null;
         MemoryAfterRegisterWrite = true;
     }
+
+    public Action? Hook { get; init; }
     
     public byte JAM { get; init; }
 

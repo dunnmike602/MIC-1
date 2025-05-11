@@ -36,6 +36,10 @@ public static class Registers
     // 	Top of Stack Cache (32bit)  Caches the top value of the stack for faster access
     public static int TOS;
 
+    // This is convenience register to track the actual location of the stack in memory as it can be moved
+    // Allows the stackdump utility to function correctly
+    public static int StackStart;
+    
     // Tracks the current OpCode, the MIC-1 architecture allows for 256 microcode slots so this will fit in a byte
     public static byte CurrentOpcode;
 
@@ -56,6 +60,7 @@ public static class Registers
         OPC = 0;
         PC = 0;
         SP = MemoryLayout.StackSegment.Top;
+        StackStart = MemoryLayout.StackSegment.Top;
         TOS = 0;
         CurrentOpcode = 0;
     }

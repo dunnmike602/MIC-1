@@ -27,4 +27,7 @@ public enum ALUOperation
     AAndB = 21,
     AOrB = 22,
     AXorB = 23,
+    ISHL = 24,
+    ISHR = 25,
+    IUSHR = 26
 }

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "MIC1": {
+      "commandName": "Project",
+      "commandLineArgs": "-t"
+    }
+  }
+}

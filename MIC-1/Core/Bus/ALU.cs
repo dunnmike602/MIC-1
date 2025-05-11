@@ -125,7 +125,19 @@ public static class ALU
             case ALUOperation.IncrementBBy3:
                 result = b + 3;
                 break;
+            
+            case ALUOperation.ISHL:
+                result = a << (b & 0x1F); // Sign is not affected
+                break;
 
+            case ALUOperation.ISHR:
+                result = a >> (b & 0x1F); // Sign-extended
+                break;
+
+            case ALUOperation.IUSHR:
+                var t = a >>> b;
+                result = a >>> (b & 0x1F); // Logical shift, fills with 0s
+                break;
             default:
                 result = 0;
                 break;

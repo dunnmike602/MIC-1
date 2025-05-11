@@ -58,6 +58,7 @@ public sealed class MIC1Simulator : IDisposable
     public bool EnableExecutionEvents;
 
     private bool _disposed;
+   
 
     public event EventHandler<ExecuteEventArgs>? ExecutionEvent;
 
@@ -112,8 +113,11 @@ public sealed class MIC1Simulator : IDisposable
         bool memoryChecking = true,
         bool showDetailedStats = true,
         bool inHaltMode = true,
-        int performanceCountInterval = 2)
+        int performanceCountInterval = 2,
+        int? core = null)
     {
+        // Pin the core if specified
+        
         // Machine Setup
         MemorySize = memorySize;
         VideoFrameRate = videoFrameRate;
@@ -414,6 +418,8 @@ public sealed class MIC1Simulator : IDisposable
                 HaltDetected = true;
                 return;
             }
+
+            mi.Hook?.Invoke();
 
             JumpToNext(mi);
 

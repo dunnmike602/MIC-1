@@ -42,6 +42,7 @@ public class Program
         }
     }
 
+
     private static void WriteStatusLine(string label, string? value, float speed)
     {
         Console.ForegroundColor = ConsoleColor.Green;
@@ -55,7 +56,7 @@ public class Program
     {
         using var emulatorCts = new CancellationTokenSource();
         using var mic1 = new MIC1Simulator(unThrottled: true,
-            memoryChecking: false, showDetailedStats: false, enableExecutionEvents:false);
+            memoryChecking: false, showDetailedStats: false, enableExecutionEvents: false);
 
         // take a snapshot of the token so we don’t capture emulatorCts
         var token = emulatorCts.Token;
@@ -65,7 +66,7 @@ public class Program
 
         try
         {
-            LoadAddTest(mic1);
+            LoadStackTest();
 
             // the lambda now only closes over `runner` and `token`
             var micTask = Task.Run(() => runner.Run(token, pc: 1000), token);
@@ -83,33 +84,6 @@ public class Program
         }
     }
 
-/*    private static void TestCores(MIC1Simulator mic1)
-    {
-        var logicalProcessorCount = Environment.ProcessorCount;
-        Console.WriteLine($"Running on {logicalProcessorCount} logical processors.");
-
-        for (var core = 0; core < logicalProcessorCount; core++)
-        {
-            Console.WriteLine($"\nRunning on Core {core}");
-
-#if WINDOWS
-            // Set affinity to one core (bitmask: 1 shifted by core number)
-            var mask = (uint)(1 << core);
-            SetThreadAffinityMask(GetCurrentThread(), mask);
-#endif
-            // Optional: Give the OS a moment to switch core (very minor delay)
-            Thread.Sleep(50);
-
-            // Run your simulator!
-            mic1.Init(true);
-
-            LoadIFEQTest(mic1);
-            mic1.Run(pc: 1000);
-
-            //PrintStats(mic1, (uint?)core);
-        }
-    }
-*/
     private static void HandleTraps(MIC1Simulator mic1)
     {
         var client = new LogPipeClient();
@@ -146,7 +120,7 @@ public class Program
         mic1.ExecutionEvent += (sender, args) => ExecutionSubject.OnNext(args);
     }
 
-    private static void LoadISUBTest(MIC1Simulator mic1)
+    private static void LoadISUBTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -163,7 +137,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadNOPTest(MIC1Simulator mic1)
+    private static void LoadNOPTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -174,8 +148,28 @@ public class Program
         // @formatter:on
     }
 
+    private static void LoadShiftTest()
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.BIPUSH, 0x01,        // 1000 - shift count (1 bit)
+            (byte)OpCode.BIPUSH, 0x0F,        // 1002 - value 15
+            (byte)OpCode.ISHL,               // 1004 - 15 << 1 = 30
 
-    private static void LoadBIPUSHTest(MIC1Simulator mic1)
+          (byte)OpCode.BIPUSH, 0x01,        // 1005 - shift count (1 bit)
+         (byte)OpCode.BIPUSH, 0xF0,        // 1007 - value -16 (0xF0 = -16)
+       (byte)OpCode.ISHR,               // 1009 - -16 >> 1 = -8 (signed)
+
+            (byte)OpCode.BIPUSH, 0x01,        // 1010 - shift count (1 bit)
+            (byte)OpCode.BIPUSH, 0xF0,        // 1012 - value -16 (again)
+            (byte)OpCode.IUSHR,              // 1014 - 0xFFFFFFF0 >>> 1 = 0x7FFFFFF8
+
+            (byte)OpCode.HALT                 // 1015 - done
+        );
+        // @formatter:on
+    }
+
+    private static void LoadBIPUSHTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -186,7 +180,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadAddTest(MIC1Simulator mic1)
+    private static void LoadAddTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -207,7 +201,7 @@ public class Program
         );
     }
 
-    private static void LoadTrapTest(MIC1Simulator mic1)
+    private static void LoadTrapTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -215,7 +209,7 @@ public class Program
         );
     }
     
-    private static void LoadIFEQTest(MIC1Simulator mic1)
+    private static void LoadIFEQTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -248,7 +242,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadANDTest(MIC1Simulator mic1)
+    private static void LoadANDTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -264,7 +258,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadORTest(MIC1Simulator mic1)
+    private static void LoadORTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -280,7 +274,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadXORTest(MIC1Simulator mic1)
+    private static void LoadXORTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -296,7 +290,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadIFNETest(MIC1Simulator mic1)
+    private static void LoadIFNETest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -326,7 +320,7 @@ public class Program
         // @formatter:on
     }
 
-    private static void LoadStackTest(MIC1Simulator mic1)
+    private static void LoadSwapTest()
     {
         // @formatter:off
         Memory.LoadBootProgram(1000,
@@ -336,9 +330,29 @@ public class Program
 
             (byte)OpCode.BIPUSH,  // 0xD003 - push 42 onto stack
             42,                   // 0xD004 - value to push
+            
+            (byte)OpCode.BIPUSH,  // 0xD003 - push 42 onto stack
+            24,                   // 0xD004 - value to push
+            
+            (byte)OpCode.SWAP,     // 0xD005 - duplicate top of stack
+            (byte)OpCode.HALT     // 0xD006 - stop
+        );
+        // @formatter:on
+    }
+    
+    private static void LoadStackTest()
+    {
+        // @formatter:off
+        Memory.LoadBootProgram(1000,
+            (byte)OpCode.SETSP,   // 0xD000 - Set the stack pointer
+            0xFF,                 // 0xD001 - high byte
+            0xBB,                 // 0xD002 - low byte
+
+            (byte)OpCode.BIPUSH,  // 0xD003 - push 42 onto stack
+            42,                   // 0xD004 - value to push
 
             (byte)OpCode.DUP,     // 0xD005 - duplicate top of stack
-
+            (byte)OpCode.POP,     // 0xD005 - duplicate top of stack
             (byte)OpCode.HALT     // 0xD006 - stop
         );
         // @formatter:on

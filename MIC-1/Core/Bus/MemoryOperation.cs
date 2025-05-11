@@ -8,5 +8,7 @@ public enum MemoryOperation
     WriteWordFromMDRHigh, 
     WriteWordFromMDRLow,
     ReadByteToMBR,
-    WriteByteFromMBR
+    WriteByteFromMBR,
+    WriteWordFromHHigh,
+    WriteWordFromHLow
 }

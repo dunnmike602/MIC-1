@@ -14,13 +14,15 @@
     <RootNamespace>MLDComputing.Emulators.MIC1</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>MLDComputing.Emulators.MIC1</AssemblyName>
+    <AssemblyName>Mike1</AssemblyName>
 	  <PublishAot>true</PublishAot>
 	  <TrimMode>full</TrimMode>
 	  <InvariantGlobalization>true</InvariantGlobalization>
 	  <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
 	  <StripSymbols>true</StripSymbols>
 	  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	  <PlatformTarget>x64</PlatformTarget>
+	  <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
   </PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -32,6 +34,7 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<PublishTrimmed>true</PublishTrimmed>
 		<TrimMode>link</TrimMode> <!-- or aggressive -->
+		<AotCompilerMode>Optimized</AotCompilerMode>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -42,6 +45,7 @@
 
 	<ItemGroup>
 	  <PackageReference Include="ReadLine" Version="2.0.1" />
+	  <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.4" />
 	  <PackageReference Include="System.Reactive" Version="6.0.1" />
 	</ItemGroup>
 </Project>

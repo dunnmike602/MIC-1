@@ -111,6 +111,34 @@ public static unsafe class Memory
 
                 _ptr[mar] = Registers.MBR;
                 break;
+
+            case MemoryOperation.WriteWordFromHHigh:
+                CheckBoundsForWord(mar);
+                if (_memoryChecking)
+                {
+                    ValidateSegment(mar);
+                }
+
+            {
+                var high = (ushort)(Registers.H >> 16);
+                _ptr[mar] = (byte)(high >> 8);
+                _ptr[mar + 1] = (byte)high;
+            }
+                break;
+
+            case MemoryOperation.WriteWordFromHLow:
+                CheckBoundsForWord(mar);
+                if (_memoryChecking)
+                {
+                    ValidateSegment(mar);
+                }
+
+            {
+                var low = (ushort)(Registers.H & 0xFFFF);
+                _ptr[mar] = (byte)(low >> 8);
+                _ptr[mar + 1] = (byte)low;
+            }
+                break;
         }
     }
 

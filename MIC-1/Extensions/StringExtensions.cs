@@ -40,4 +40,9 @@ public static class StringExtensions
     {
         return ((int)value).FormatValue(format);
     }
+
+    public static string FormatValue(this ushort value, NumberFormat format)
+    {
+        return ((int)value).FormatValue(format);
+    }
 }
