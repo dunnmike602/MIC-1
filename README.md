@@ -66,83 +66,6 @@ The microcode store can be customized to support new instructions (e.g., SWAP, S
 
 You can extend the IJVM instruction set, modify control store behavior, or implement new trap conditions
 
-📘 References
-Andrew S. Tanenbaum, Structured Computer Organization – MIC-1 and IJVM chapters
-
-IJVM Instruction Set Summary
-
-Let me know if you'd like a second section that walks through a Getting Started or Building & Running example tailored to this repo.
-
-
-
-
-
-
-
-You said:
-Ok can you add that it implements this instructions set so far using MLDComputing.Emulators.MIC1.Core.MicroCode;
-
-namespace MLDComputing.Emulators.MIC1.Core.IJVM;
-
-public enum OpCode : byte
-{
-    NOP = MicroInstructionCode.FETCHStartFetchDecode & 0xFF,
-    
-    FETCH = MicroInstructionCode.FETCHStartFetchDecode & 0xFF,
-
-    // Push byte onto stack
-    BIPUSH = MicroInstructionCode.BIPUSHCopyPCToMar & 0xFF,
-
-    // Pop two words from stack; push their sum
-    IADD = MicroInstructionCode.IADDLoadFirst & 0xFF,
-
-    // Pop two words from stack; push their sum
-    ISUB = MicroInstructionCode.ISUBLoadFirst & 0xFF,
-
-    IAND = MicroInstructionCode.IANDLoadFirst & 0xFF,
-
-    IOR = MicroInstructionCode.IORLoadFirst & 0xFF,
-
-    IXOR = MicroInstructionCode.IXORLoadFirst & 0xFF,
-
-    ISHL = MicroInstructionCode.ISHLLoadFirst & 0xFF,
-
-    ISHR = MicroInstructionCode.ISHRLoadFirst & 0xFF,
-
-    IUSHR = MicroInstructionCode.IUSHRLoadFirst & 0xFF,
-    
-    // Copy top word on stack and push onto stack
-    DUP = MicroInstructionCode.DUPLoadTopAddress & 0xFF,
-
-    // Unconditional Branch
-    GOTO = MicroInstructionCode.GOTOInit & 0xFF,
-
-    // Branch IF Eq to Zero
-    IFEQ = MicroInstructionCode.IFEQLoadTop & 0xFF,
-    
-
-    IFNE = MicroInstructionCode.IFNELoadTop & 0xFF,
-    
-    // Reserved for Extension Instructions
-
-    // Set Stack Pointer High Byte and Low Byte
-    SETSP = MicroInstructionCode.SETSPLoadHigh & 0xFF,
-
-    POP = MicroInstructionCode.POPIncrementSP & 0xFF,
-    
-    SWAP = MicroInstructionCode.POPIncrementSP & 0xFF,
-    
-    // Terminate execution of machine
-    HALT = MicroInstructionCode.HALT & 0xFF,
-    
-    // Pseudo Instruction for Managing the TOS
-    TOS = MicroInstructionCode.ReloadTOSSetMAR,
-}
-
-
-ChatGPT said:
-Certainly! Here's an updated version of the README introduction with a section that explicitly lists the currently implemented IJVM instruction set, based on your OpCode enum under MLDComputing.Emulators.MIC1.Core.IJVM.
-
 🧠 MIC-1 Simulator (.NET/C#)
 This project is a high-performance, event-driven emulator of the MIC-1 microprogrammed architecture, as described by Andrew S. Tanenbaum in Structured Computer Organization. Built in C#, it offers cycle-accurate simulation, execution introspection, and microcode customization through the MLDComputing.Emulators.MIC1.Core namespace.
 
@@ -162,10 +85,6 @@ This project is a high-performance, event-driven emulator of the MIC-1 microprog
 📦 Implemented IJVM Instructions
 This simulator currently supports the following IJVM and extended instructions, defined under:
 
-csharp
-Copy
-Edit
-namespace MLDComputing.Emulators.MIC1.Core.IJVM
 Instruction	Description
 NOP	No operation
 FETCH	Internal opcode fetch routine
@@ -188,11 +107,9 @@ SETSP	Custom instruction to set the stack pointer
 HALT	Stop processor execution
 TOS	Pseudo-op to reload the top of stack pointer
 
-🔧 Work in progress:
+IFLT (Branch if top of stack < 0)
 
- IFLT (Branch if top of stack < 0)
-
- IF_ICMPEQ (Compare top two stack values and branch if equal)
+IF_ICMPEQ (Compare top two stack values and branch if equal)
 
 🖥 Example Usage
 csharp
@@ -200,3 +117,82 @@ Copy
 Edit
 var sim = new MIC1Simulator(memorySize: 65536, targetProcessorSpeed: 1_000_000);
 sim.Run(CancellationToken.None, clearState: true, pc: 0x100, bytes: bootProgram);
+
+MIC-1 Controller Console
+The project includes a fully interactive command-line controller under the namespace:
+
+csharp
+Copy
+Edit
+MLDComputing.Emulators.MIC1.Controller
+This acts as a front-end interface for driving the simulator, inspecting internal state, debugging, and performance monitoring. It allows users to interactively control the MIC-1 runtime through a set of powerful text-based commands.
+
+✅ Controller Features
+🧠 Interactive REPL loop with command auto-completion and history
+
+🛠 Simulator controls: start, stop, reset, exit, set (toggles for memory check, events, etc.)
+
+🪛 System introspection:
+
+reg: Show CPU register values
+
+info: System settings and memory layout
+
+dumpmem: Dump memory regions
+
+dumpstack: Stack dump as raw bytes or 2×16-bit word pairs
+
+🔬 Performance monitoring:
+
+perf: Set performance interval
+
+perfmon: Live performance tracking with ESC to stop
+
+⚠️ Error tracking:
+
+showerrors: View most recent simulation faults
+
+clearerrors: Clear error log
+
+📊 Statistics and profiling:
+
+stats: Show instruction counts and microcycle stats
+
+💬 Built-in command help system with help [command]
+
+🖥️ Example Usage
+Launch the interactive controller:
+
+csharp
+Copy
+Edit
+var sim = new MIC1Simulator();
+var controller = new Mic1Controller(sim);
+controller.Run();
+Then use commands like:
+
+text
+Copy
+Edit
+> start
+> dumpstack hex sw
+> stats d
+> perfmon
+> stop
+🧰 Commands Overview
+Command	Description
+start/stop	Begin or pause execution
+reset	Reset simulator state
+set	Toggle features (memory check, stats)
+reg	Show register contents
+dumpmem	Display memory in multiple formats
+dumpstack	Display stack in byte or word mode
+stats	Show detailed IJVM execution metrics
+perfmon	Start live performance sampling
+help	View command help
+exit	Cleanly shut down the controller
+
+This console interface makes it easy to drive experiments, debug microcode, or observe performance trends while executing IJVM programs on the MIC-1 simulator.
+
+📘 References
+Andrew S. Tanenbaum, Structured Computer Organization – MIC-1 and IJVM chapters
